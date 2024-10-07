@@ -1,6 +1,6 @@
 # Network Info Parser
 
-This script parses the ARIN/APNIC/LACNIC/AfriNIC/RIPE databases into a local PostgreSQL database.
+Provides a local PostgreSQL database replica of ARPA (ARIN/APNIC/LACNIC/AfriNIC/RIPE) to avoid being rate-limited with mass whois queries.
 After the parsing is finished you can get the infos for any IPv4 or IPv6 by querying the database.
 
 This project was used in analysing some data dumps and cross referencing the IPs with the networks.
@@ -20,19 +20,7 @@ Hint: The Database can grow fast so be sure to have enough space. On docker my p
 
 # Docker
 
-You can simply pull the image from Docker Hub and connect it to a local database via
-
-```sh
-docker pull firefart/network_info
-docker run --rm firefart/network_info -c postgresql://user:pass@db:5432/network_info
-```
-
-Or cou can connect the docker container to another database container.
-
-```sh
-docker run --name network_info_db -e POSTGRES_DB=network_info -e POSTGRES_USER=network_info -e POSTGRES_PASSWORD=network_info -d postgres:9-alpine
-docker run --rm --link network_info_db:postgres firefart/network_info -c postgresql://user:pass@db:5432/network_info
-```
+## Docker-Compose build (prefered)
 
 If you have checked out the GIT repo you can run the script via `docker compose`.
 I included some binstubs so you don't have to deal with all the docker commands.
@@ -40,28 +28,48 @@ I included some binstubs so you don't have to deal with all the docker commands.
 If you run
 
 ```sh
-./bin/network_info
+git clone https://audioscavenger.com/firefart/whoisd
+cd whoisd
+./bin/whoisd
 ```
 
 the image will be built, a postgres database is connected, the files are downloaded and the parsing begins.
-The database stays up after the run (you can see it via `docker ps`) so you can connect it to your script.
+* The database stays up after the run (you can see it via `docker ps`) so you can connect it to your script.
+* The whoisd container only downloads the ARPA databases and parse them into the database container. It stops when done.
 
 For a one shot query you can run
 
 ```
-./bin/query IPv4
+./bin/query 1.1.1.1
 ```
 
 or
 
 ```
-./bin/query IPv6
+./bin/query 2606:4700:4700::1001
 ```
 
 Or for a psql prompt
 
 ```
 ./bin/psql
+```
+
+## Docker-download (TBD)
+- I did not push this image to docker yet -
+
+You can simply pull the image from Docker Hub and connect it to a local database via
+
+```sh
+docker pull audioscavenger/whoisd
+docker run --rm audioscavenger/whoisd -c postgresql://user:pass@db:5432/whoisd
+```
+
+Or cou can connect the docker container to another database container.
+
+```sh
+docker run --name whoisd_db -e POSTGRES_DB=whoisd -e POSTGRES_USER=whoisd -e POSTGRES_PASSWORD=whoisd -d postgres:9-alpine
+docker run --rm --link whoisd_db:postgres audioscavenger/whoisd -c postgresql://user:pass@db:5432/whoisd
 ```
 
 # Manual Installation
@@ -79,11 +87,11 @@ apt install postgresql python3 python-pip
 pip install -r requirements.txt
 ```
 
-Create PostgreSQL database (Use "network_info" as password):
+Create PostgreSQL database (Use "whoisd" as password):
 
 ```sh
-sudo -u postgres createuser --pwprompt --createdb network_info
-sudo -u postgres createdb --owner=network_info network_info
+sudo -u postgres createuser --pwprompt --createdb whoisd
+sudo -u postgres createdb --owner=whoisd whoisd
 ```
 
 Prior to starting this script you need to download the database dumps by executing:
@@ -108,7 +116,7 @@ or -
 # Sample run (docker compose)
 
 ```
-$ ./bin/network_info
+$ ./bin/whoisd
 Creating network "ripe_default" with the default driver
 Creating volume "ripe_pg_data" with local driver
 Creating ripe_db_1
@@ -222,3 +230,29 @@ created       |
 last_modified | 2008-09-04 06:51:49
 source        | apnic
 ```
+
+# RoadMap
+TODO:
+
+- [ ] test REBUILD with the new name
+- [ ] fix the bug where the whoisd build output is invisible
+- [ ] replace all binstubs commands with demonized compose
+- [ ] Start charging for my hard work?
+
+## release 2.0.0
+
+- 2.0.2 download_dumps.sh does not re-download existing databases
+- 2.0.1 complete rewrite of the create_db.py and database structure
+- 2.0.0 initial fork and rename from network_info to whoisd
+
+## :ribbon: Licence
+[MIT](https://choosealicense.com/licenses/mit/)
+
+
+## :beer: Buy me a beer
+Like my work? This tool helped you? Want to sponsor more awesomeness like this?
+
+<p align="center">
+ <a href="https://www.paypal.com/donate/?hosted_button_id=CD7P7PK3WP8WU"><img src="/assets/paypal-Donate-QR-Code.png" /></a>
+</p>
+

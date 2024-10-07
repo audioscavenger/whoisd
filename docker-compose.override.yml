@@ -1,7 +1,7 @@
-version: "3"
+---
 services:
-  network_info:
+  whoisd:
     entrypoint: /app/create_db.py
-    command: -c postgresql+psycopg://network_info:network_info@db:5432/network_info -d
+    command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd -d
     volumes:
-      - .:/app
+      - /docker/whoisd:/app

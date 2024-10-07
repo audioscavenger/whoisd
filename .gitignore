@@ -1,6 +1,12 @@
+*.7z
+*.zip
+*.lnk
+ubuntu*.sh
+
 .idea/
 *.pyc
 *.swp
+data/
 databases/
 env/
 .bash_history

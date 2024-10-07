@@ -12,11 +12,12 @@ RUN apk add --no-cache bash postgresql-libs \
   && pip install -r requirements.txt \
   && apk del --no-cache .builddeps
 
+# exclusions in .dockerignore
 COPY . /app
 RUN chown -R app:app /app
 USER app
 
-RUN mkdir -p databases
+RUN mkdir -p downloads
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["--help"]

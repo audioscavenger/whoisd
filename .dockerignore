@@ -1,7 +1,13 @@
+*.7z
+*.zip
+*.lnk
+ubuntu*.sh
 .git/
+.github/
 env/
 bin/
-databases/
+downloads/
+data/
 TODO
 query_db.sh
 .*
