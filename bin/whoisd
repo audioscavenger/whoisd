@@ -11,6 +11,8 @@ DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 echo DEBUG: cd $DIR/../
 cd $DIR/../
 if [[ -n "$REBUILD" ]]; then
+  docker-compose stop
+  docker image rm whoisd
   docker pull python:3-alpine
   docker pull postgres:13-alpine
   docker-compose build

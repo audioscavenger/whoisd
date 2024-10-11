@@ -1,5 +1,6 @@
 *.7z
 *.zip
+*.gz
 *.lnk
 ubuntu*.sh
 .git/

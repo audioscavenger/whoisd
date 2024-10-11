@@ -1,5 +1,5 @@
 FROM python:3-alpine
-LABEL maintainer="Christian Mehlmauer <FireFart@gmail.com>"
+LABEL maintainer="AudioscavengeR <dev@derewonko.com>"
 
 RUN adduser -h /app -g app -D app
 

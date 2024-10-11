@@ -29,8 +29,7 @@ class BlockCidr(Base):
   source = Column(String, index=True)
   
   __table_args__ = (
-    Index('ix_cidr_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), 
-    Index('ix_cidr_remarks', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), )
+    Index('ix_cidr_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), )
   
   def __str__(self):
     return f'inetnum: {self.inetnum}, object: {self.object}, netname: {self.netname}, autnum: {self.autnum}, desc: {self.description}, remarks: {self.remarks}, country: {self.country}, created: {self.created}, last_modified: {self.last_modified}, status: {self.status}, source: {self.source}'
@@ -50,8 +49,7 @@ class BlockMember(Base):
   remarks = Column(String)
   
   __table_args__ = (
-    Index('ix_member_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), 
-    Index('ix_member_remarks', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), )
+    Index('ix_member_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), )
   
   def __str__(self):
     return f'id: {self.id}, object: {self.object}, name: {self.name}, description: {self.description}, remarks: {self.remarks}'
@@ -70,8 +68,7 @@ class BlockObject(Base):
   remarks = Column(String, index=True)
   
   __table_args__ = (
-    Index('ix_object_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), 
-    Index('ix_object_remarks', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), )
+    Index('ix_object_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), )
   
   def __str__(self):
     return f'name: {self.name}, object: {self.object}, description: {self.description}, remarks: {self.remarks}'
@@ -82,11 +79,15 @@ class BlockObject(Base):
 # BlockParent: parent-children relationships between all 3 tables
 class BlockParent(Base):
   __tablename__ = 'parent'
-  id = Column(Integer, primary_key=True)
-  parent      = Column(String, nullable=False, index=True)
-  parent_type = Column(String, nullable=False, index=True)
-  child       = Column(String, nullable=False, index=True)
-  child_type  = Column(String, nullable=False, index=True)
+  # id = Column(Integer, primary_key=True)
+  # parent      = Column(String, nullable=False, index=True)
+  # parent_type = Column(String, nullable=False, index=True)
+  # child       = Column(String, nullable=False, index=True)
+  # child_type  = Column(String, nullable=False, index=True)
+  parent      = Column(String, primary_key=True)
+  parent_type = Column(String, primary_key=True)
+  child       = Column(String, primary_key=True)
+  child_type  = Column(String, primary_key=True)
   
   def __str__(self):
     return f'parent: {self.parent}, parent_type: {self.parent_type}, child: {self.child}, child_type: {self.child_type}'

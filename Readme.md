@@ -28,7 +28,7 @@ I included some binstubs so you don't have to deal with all the docker commands.
 If you run
 
 ```sh
-git clone https://audioscavenger.com/firefart/whoisd
+git clone https://github.com/audioscavenger/whoisd
 cd whoisd
 ./bin/whoisd
 ```
@@ -235,12 +235,14 @@ source        | apnic
 TODO:
 
 - [ ] test REBUILD with the new name
-- [ ] fix the bug where the whoisd build output is invisible
 - [ ] replace all binstubs commands with demonized compose
 - [ ] Start charging for my hard work?
 
-## release 2.0.0
+## version: 2.0.5
 
+- 2.0.5 WIP to get new database inserts working: inetnum works
+- 2.0.4 WIP to get new database inserts working: inetnum works
+- 2.0.3 [x] fix the bug where the whoisd build output is invisible - it fixed itself
 - 2.0.2 download_dumps.sh does not re-download existing databases
 - 2.0.1 complete rewrite of the create_db.py and database structure
 - 2.0.0 initial fork and rename from network_info to whoisd

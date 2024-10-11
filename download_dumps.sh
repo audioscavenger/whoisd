@@ -8,6 +8,7 @@ function download {
   if [ ! -s "$DOWNLOAD_DIR/$dbzname" -a ! -s "$DOWNLOAD_DIR/done/$dbzname" ]; then
     echo "Downloading $dbzname..."
     wget -O "$DOWNLOAD_DIR/$dbzname" "$1"
+    chmod 644 "$DOWNLOAD_DIR/$dbzname"
   else
     echo "SKIP: $dbzname"
   fi
@@ -28,7 +29,7 @@ download "https://ftp.arin.net/pub/rr/arin.db.gz"
 
 # download "https://ftp.lacnic.net/lacnic/dbase/lacnic.db.gz"
 
-download "https://ftp.ripe.net/ripe/dbase/ripe.db.gz"
+# download "https://ftp.ripe.net/ripe/dbase/ripe.db.gz"
 # download "https://ftp.ripe.net/ripe/dbase/split/ripe.db.inetnum.gz"
 # download "https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz"
 

@@ -37,18 +37,23 @@ import time
 from multiprocessing import cpu_count, Queue, Process, current_process
 import logging
 import re
-import os.path
+import os
 
 from db.model import BlockCidr
 from db.model import BlockMember
+from db.model import BlockObject
+from db.model import BlockParent
 from db.helper import setup_connection
+from sqlalchemy.exc import SQLAlchemyError
 from netaddr import iprange_to_cidrs
 
 VERSION = '2.1'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
-LOG_FORMAT = '%(asctime)-15s - %(name)-9s - %(levelname)-8s - %(processName)-11s - %(filename)s - %(message)s'
+LOG_FORMAT = '%(asctime)-15s - %(name)-9s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
 COMMIT_COUNT = 10000
+MODULO = 10000
+TIME2COMMIT = False
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
 
@@ -67,6 +72,7 @@ formatter = logging.Formatter(LOG_FORMAT)
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
+
 
 
 def get_source(filename: str):
@@ -116,7 +122,7 @@ def parse_properties(block: str, name: str) -> list:
     # return re.split(',\s+|,|\s+|\n', x.decode('latin-1'))
     return re.sub(r'\W+', ',', x.decode('latin-1')).split(',')
   else:
-    return None
+    return []
 
 def parse_property(block: str, name: str) -> str:
   match = re.findall(rb'^%s:\s?(.+)$' % (name), block, re.MULTILINE)
@@ -140,94 +146,103 @@ def parse_property_inetnum(block: str):
     rb'^inetnum:[\s]*((?:\d{1,3}\.){3}\d{1,3})[\s]*-[\s]*((?:\d{1,3}\.){3}\d{1,3})', block, re.MULTILINE)
   if match:
     # netaddr can only handle strings, not bytes
-    ip_start = match[0][0].decode('utf-8')
-    ip_end = match[0][1].decode('utf-8')
+    ip_start = match[0][0]
+    ip_end = match[0][1]
     cidrs = iprange_to_cidrs(ip_start, ip_end)
     return cidrs
   # direct CIDR in lacnic db
   match = re.findall(rb'^inetnum:[\s]*((?:\d{1,3}\.){3}\d{1,3}/\d+)', block, re.MULTILINE)
   if match:
-    return match[0]
+    return [match[0]]
   # lacnic with wrong ip
   # inetnum:  177.46.7/24
   match = re.findall(rb'^inetnum:[\s]*((?:\d{1,3}\.){2}\d{1,3}/\d+)', block, re.MULTILINE)
   if match:
     tmp = match[0].split(b"/")
-    return f"{tmp[0].decode('utf-8')}.0/{tmp[1].decode('utf-8')}".encode("utf-8")
+    return [f"{tmp[0].decode('utf-8')}.0/{tmp[1].decode('utf-8')}".encode("utf-8")]
   # inetnum:  148.204/16
   match = re.findall(rb'^inetnum:[\s]*((?:\d{1,3}\.){1}\d{1,3}/\d+)', block, re.MULTILINE)
   if match:
     tmp = match[0].split(b"/")
-    return f"{tmp[0].decode('utf-8')}.0.0/{tmp[1].decode('utf-8')}".encode("utf-8")
+    return [f"{tmp[0].decode('utf-8')}.0.0/{tmp[1].decode('utf-8')}".encode("utf-8")]
   # IPv6
   match = re.findall(
     rb'^inet6num:[\s]*([0-9a-fA-F:\/]{1,43})', block, re.MULTILINE)
   if match:
-    return match[0]
-  return None
-
-# no sir, a route is not an inet. 
-# route: specifies the IPv4 address prefix of the route. 
-# Together with the "origin:" attribute, these constitute a combined primary key of the route object. 
-# The address can only be specified as a prefix. It can be one or more IP addresses.
-# HOWEVER... we will combine them in cidr table as our goal is to identify an IP not reverse-engineer ARPA databases
-def parse_property_route(block: str):
+    return [match[0]]
+  # return None
+  
+  # no sir, a route is not an inet. 
+  # route: specifies the IPv4 address prefix of the route. 
+  # Together with the "origin:" attribute, these constitute a combined primary key of the route object. 
+  # The address can only be specified as a prefix. It can be one or more IP addresses.
+  # HOWEVER... we will combine them in cidr table as our goal is to identify an IP not reverse-engineer ARPA databases
+    
+  # def parse_property_route(block: str):
   # route IPv4
   match = re.findall(
     rb'^route:[\s]*((?:\d{1,3}\.){3}\d{1,3}/\d{1,2})', block, re.MULTILINE)
   if match:
-    return match[0]
+    return [match[0]]
   # route6 IPv6
   match = re.findall(
     rb'^route6:[\s]*([0-9a-fA-F:\/]{1,43})', block, re.MULTILINE)
   if match:
-    return match[0]
+    return [match[0]]
   return None
 
 
-def read_blocks(filename: str) -> list:
-  if filename.endswith('.gz'):
+def read_blocks(filepath: str) -> list:
+  if filepath.endswith('.gz'):
     opemethod = gzip.open
   else:
     opemethod = open
-  cust_source = get_source(filename.split('/')[-1])
+  cust_source = get_source(filepath.split('/')[-1])
   single_block = b''
   blocks = []
+  ignored_blocks = 0
+  filesize = os.stat(filepath).st_size
+  global MODULO
+  if filesize >  8000000: MODULO = 100000
+  if filesize > 99999999: MODULO = 1000000
 
-  with opemethod(filename, mode='rb') as f:
+  with opemethod(filepath, mode='rb') as f:
     for line in f:
-      # skip comments
+      # skip comments and remarks
       if line.startswith(b'%') or line.startswith(b'#') or line.startswith(b'remarks:'):
         continue
       # block end
       if line.strip() == b'':
-        if single_block.lower().startswith((b'inetnum:', b'inet6num:', b'route:', b'route6:', b'as-set:')):
+        if single_block.lower().startswith((b'inetnum:', b'inet6num:', b'route:', b'route6:', b'as-set:', b'inetnum', b'route', b'inet6num', b'route6', b'mntner', b'person', b'role', b'organisation', b'irt', b'aut-num', b'as-set', b'route-set', b'domain')):
           # add source
           single_block += b"cust_source: %s" % (cust_source)
           blocks.append(single_block)
-          if len(blocks) % 1000 == 0:
+          if len(blocks) % MODULO == 0:
             logger.debug(
-              f"parsed another 1000 blocks ({len(blocks)} so far)")
+              f"parsed another {MODULO} blocks ({len(blocks)} so far, ignored {ignored_blocks} blocks)")
           single_block = b''
           # comment out to only parse x blocks
           # if len(blocks) == 100:
           #  break
         else:
+          # empty block
           single_block = b''
+          ignored_blocks += 1
       else:
         single_block += line
-  logger.info(f"Got {len(blocks)} blocks")
+  logger.info(f"Total {len(blocks) + ignored_blocks} blocks: Parsed {len(blocks)} blocks, ignored {ignored_blocks} blocks")
   global NUM_BLOCKS
   NUM_BLOCKS = len(blocks)
   return blocks
 
 
-def updateCounter(counter: int, commit: bool):
-  counter += 1
-  # we do not reset commit until it's False: this way even when we bypass the modulo, we get a commit close to it
-  if not commit:
-    commit = counter % COMMIT_COUNT == 0
-  return counter, commit
+def updateCounter(counter: int):
+  # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
+  global TIME2COMMIT
+  if not TIME2COMMIT:
+    if counter % COMMIT_COUNT == 0:
+      TIME2COMMIT = True
+  return counter + 1
 
 
 # https://stackoverflow.com/questions/4578590/python-equivalent-of-filter-getting-two-output-lists-i-e-partition-of-a-list
@@ -248,8 +263,9 @@ def parse_blocks(jobs: Queue, connection_string: str):
   session = setup_connection(connection_string)
 
   counter = 0
-  BLOCKS_DONE = 0
-  commit = False
+  duplicates = 0
+  blocks_done = 0
+  global TIME2COMMIT
 
   start_time = time.time()
   while True:
@@ -259,9 +275,9 @@ def parse_blocks(jobs: Queue, connection_string: str):
     
     source = parse_property(block, b'cust_source')
     
-    # BlockCidr: inetnum, route
+    # BlockCidr: inetnum, route, inet6num, route6
     inetnum       = parse_property_inetnum(block)
-    route         = parse_property_route(block)
+    # route         = parse_property_route(block)   # easier to combine inetnum and route
     
     # BlockMember: mntner, person, role, organisation, irt
     mntner        = parse_property(block, b'mntner')
@@ -276,7 +292,7 @@ def parse_blocks(jobs: Queue, connection_string: str):
     routeset      = parse_property(block, b'route-set')
     domain        = parse_property(block, b'domain')
     
-    if not inetnum and not route and not mntner and not person and not role and not organisation and not domain and not irt and not autnum and not asset and not routeset:
+    if not inetnum and not mntner and not person and not role and not organisation and not domain and not irt and not autnum and not asset and not routeset:
       # invalid entry, do not parse
       logger.info(f"Could not parse block {block}.")
       continue
@@ -332,13 +348,16 @@ def parse_blocks(jobs: Queue, connection_string: str):
     # source:         mandatory  single     
     
     # BlockCidr: inetnum, route
-    if inetnum or route:
+    # if inetnum or route:
+    if inetnum:
       # INETNUM netname: is a name given to a range of IP address space. A netname is made up of letters, digits, the underscore character and the hyphen character. The first character of a name must be a letter, and the last character of a name must be a letter or a digit. It is recommended that the same netname be used for any set of assignment ranges used for a common purpose, such as a customer or service.
       netname = parse_property(block, b'netname')
-      object=b'inetnum'
-      if not netname:
+      if netname:
+        object=b'inetnum'
+      else:
         # we need to be able to reference routes with aut-num as they have no name
-        netname = route
+        # netname = route
+        netname = inetnum
         object=b'route'
       
       # ROUTE origin: is AS Number of the Autonomous System that originates the route into the interAS routing system. The corresponding aut-num object for this Autonomous System may not exist in the RIPE Database.
@@ -372,8 +391,8 @@ def parse_blocks(jobs: Queue, connection_string: str):
       last_modified = parse_property(block, b'last-modified')
       if not last_modified:
         changed = parse_property(block, b'changed')
-        # ***@ripe.net 19960624
-        # a.c@domain.com 20060331
+        # *@ripe.net   19960624
+        # *@domain.com 20060331
         # maybe repeated multiple times, we only take the first
         if re.match(r'^.+?@.+? \d+', changed):
           date = changed.split(" ")[1].strip()
@@ -395,29 +414,48 @@ def parse_blocks(jobs: Queue, connection_string: str):
           last_modified = changed
       status = parse_property(block, b'status')
       
-      if isinstance(inetnum, list):
-        for cidr in inetnum:
-          b = BlockCidr(inetnum=str(cidr), object=object, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
+      # https://stackoverflow.com/questions/2136739/error-handling-in-sqlalchemy
+      for cidr in inetnum:
+        try:
+          # logger.debug('counter1: %d' % counter)
+          b = BlockCidr(inetnum=cidr.decode('utf-8'), object=object, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
+          # logger.debug('counter2: %d' % counter)
           session.add(b)
-          counter, commit = updateCounter(counter, commit)
-      else:
-        b = BlockCidr(inetnum=inetnum.decode('utf-8'), object=object, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
-        session.add(b)
-        counter, commit = updateCounter(counter, commit)
+          # logger.debug('counter3: %d' % counter)
+          counter = updateCounter(counter)
+          # logger.debug('counter4: %d' % counter)
+          # session.flush()
+          # logger.debug('counter5: %d' % counter)
+        except SQLAlchemyError as e:
+          counter -=1
+          duplicates +=1
+          session.rollback()
+          # logger.debug('counter6: %d: %s' % (counter, type(e))) #  <class 'sqlalchemy.exc.IntegrityError'>
+          # logger.debug('     -1 : %d: %s' % (counter, e.__class__.__name__))
     
       # inverse keys:
       for parent_type, parents in [mntby, memberof, org, mntlowers, mntroutes, mntdomains, mntnfy, mntirt, adminc, techc, abusec, notifys]:
         for parent in parents:
-          b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
-          session.add(b)
-          counter, commit = updateCounter(counter, commit)
+          try:
+            b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
+            session.add(b)
+            counter = updateCounter(counter)
+          except SQLAlchemyError as e:
+            counter -=1
+            duplicates +=1
+            session.rollback()
       
       # local keys:
       for child_type, children in [notifys]:
         for child in children:
-          b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
-          session.add(b)
-          counter, commit = updateCounter(counter, commit)
+          try:
+            b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
+            session.add(b)
+            counter = updateCounter(counter)
+          except SQLAlchemyError as e:
+            counter -=1
+            duplicates +=1
+            session.rollback()
     
     
     
@@ -526,65 +564,75 @@ def parse_blocks(jobs: Queue, connection_string: str):
     # organisation = parse_property(block, b'organisation')
     # irt = parse_property(block, b'irt')
     
-    if mntner or person or role or organisation or irt:
-      if mntner:
-        id = name = mntner
-        object = b'mntner'
-      if person:
-        id = parse_property(block, b'nic-hdl')
-        name = person
-        object = b'person'
-      if role:
-        id = parse_property(block, b'nic-hdl')
-        name = role
-        object = b'role'
-      if organisation:
-        id = organisation
-        name = parse_property(block, b'org-name')
-        object = b'organisation'
-      if irt:
-        id = name = irt
-        object = b'irt'
+    # if mntner or person or role or organisation or irt:
+      # if mntner:
+        # id = name = mntner
+        # object = b'mntner'
+      # if person:
+        # id = parse_property(block, b'nic-hdl')
+        # name = person
+        # object = b'person'
+      # if role:
+        # id = parse_property(block, b'nic-hdl')
+        # name = role
+        # object = b'role'
+      # if organisation:
+        # id = organisation
+        # name = parse_property(block, b'org-name')
+        # object = b'organisation'
+      # if irt:
+        # id = name = irt
+        # object = b'irt'
         
-      description = parse_property(block, b'descr')
-      remarks     = parse_property(block, b'remarks')
+      # description = parse_property(block, b'descr')
+      # remarks     = parse_property(block, b'remarks')
       
-      # Parent table:
-      org         =   (b'organisation', parse_properties(block, b'org'))
-      mntby       =   (b'mntner', parse_properties(block, b'mnt-by'))
-      adminc      =   (b'mntner', parse_properties(block, b'admin-c'))
-      techc       =   (b'mntner', parse_properties(block, b'tech-c'))
-      abusec      =   (b'mntner', parse_properties(block, b'abuse-c'))
-      mntnfys     =   (b'mntner', parse_properties(block, b'mnt-nfy'))
-      mntrefs     =   (b'mntner', parse_properties(block, b'mnt-ref'))
+      # # Parent table:
+      # org         =   (b'organisation', parse_properties(block, b'org'))
+      # mntby       =   (b'mntner', parse_properties(block, b'mnt-by'))
+      # adminc      =   (b'mntner', parse_properties(block, b'admin-c'))
+      # techc       =   (b'mntner', parse_properties(block, b'tech-c'))
+      # abusec      =   (b'mntner', parse_properties(block, b'abuse-c'))
+      # mntnfys     =   (b'mntner', parse_properties(block, b'mnt-nfy'))
+      # mntrefs     =   (b'mntner', parse_properties(block, b'mnt-ref'))
       
-      # Emails and l  ocal stuff)
-      address     =   (b'address', parse_properties(block, b'address'))
-      phone       =   (b'phone', parse_properties(block, b'phone'))
+      # # Emails and l  ocal stuff)
+      # address     =   (b'address', parse_properties(block, b'address'))
+      # phone       =   (b'phone', parse_properties(block, b'phone'))
       
-      notifys     =   (b'e-mail', parse_properties(block, b'notify'))
-      irtnfys     =   (b'e-mail', parse_properties(block, b'irt-nfy'))
-      emails      =   (b'e-mail', parse_properties(block, b'e-mail'))
-      refnfys     =   (b'e-mail', parse_properties(block, b'ref-nfy'))
-      updtos      =   (b'e-mail', parse_properties(block, b'upd-to'))
+      # notifys     =   (b'e-mail', parse_properties(block, b'notify'))
+      # irtnfys     =   (b'e-mail', parse_properties(block, b'irt-nfy'))
+      # emails      =   (b'e-mail', parse_properties(block, b'e-mail'))
+      # refnfys     =   (b'e-mail', parse_properties(block, b'ref-nfy'))
+      # updtos      =   (b'e-mail', parse_properties(block, b'upd-to'))
       
-      b = BlockCidr(id=id, object=object, name=name, description=description, remarks=remarks)
-      session.add(b)
-      counter, commit = updateCounter(counter, commit)
+      # b = BlockCidr(id=id, object=object, name=name, description=description, remarks=remarks)
+      # session.add(b)
+      # counter = updateCounter(counter)
       
-      # inverse keys:
-      for parent_type, parents in [org, mntby, adminc, techc, abusec, mntnfys, mntrefs]:
-        for parent in parents:
-          b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
-          session.add(b)
-          counter, commit = updateCounter(counter, commit)
+      # # inverse keys:
+      # for parent_type, parents in [org, mntby, adminc, techc, abusec, mntnfys, mntrefs]:
+        # for parent in parents:
+          # try:
+            # b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
+            # session.add(b)
+            # counter = updateCounter(counter)
+            # session.flush()
+          # except SQLAlchemyError as e:
+            # error = str(e.__dict__['orig'])
+            # print(type(e), error)
       
-      # local keys:
-      for child_type, children in [address, phone, notifys, irtnfys, emails, refnfys, updtos]:
-        for child in children:
-          b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
-          session.add(b)
-          counter, commit = updateCounter(counter, commit)
+      # # local keys:
+      # for child_type, children in [address, phone, notifys, irtnfys, emails, refnfys, updtos]:
+        # for child in children:
+          # try:
+            # b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
+            # session.add(b)
+            # counter = updateCounter(counter)
+            # session.flush()
+          # except SQLAlchemyError as e:
+            # error = str(e.__dict__['orig'])
+            # print(type(e), error)
     
     
     
@@ -669,92 +717,107 @@ def parse_blocks(jobs: Queue, connection_string: str):
     # routeset = parse_property(block, b'route-set')
     # domain = parse_property(block, b'domain')
     
-    if autnum or asset or routeset or domain:
-      if autnum:
-        name = autnum
-        object = b'aut-num'
-      if asset:
-        name = asset
-        object = b'as-set'
-      if routeset:
-        name = routeset
-        object = b'route-set'
-      if domain:
-        name = domain
-        object = b'domain'
-        
-      description = parse_property(block, b'descr')
-      remarks     = parse_property(block, b'remarks')
-      
-      # Parent table:
+    # if autnum or asset or routeset or domain:
+      # if autnum:
+        # name = autnum
+        # object = b'aut-num'
       # if asset:
-        # mbrsbyref = (b'aut-num', parse_properties(block, b'mbrs-by-ref'))
+        # name = asset
+        # object = b'as-set'
+      # if routeset:
+        # name = routeset
+        # object = b'route-set'
+      # if domain:
+        # name = domain
+        # object = b'domain'
+        
+      # description = parse_property(block, b'descr')
+      # remarks     = parse_property(block, b'remarks')
+      
+      # # Parent table:
+      # # if asset:
+        # # mbrsbyref = (b'aut-num', parse_properties(block, b'mbrs-by-ref'))
+      # # else:
+        # # # route-set contains a mix of aut-num and routes (CIDR), just great...
+        # # # TODO: identify each value and create 2 lists one for each type
+        # # mbrsbyref = (None, [])
+        # # # mbrsbyref   = (b'organisation', parse_properties(block, b'mbrs-by-ref'))
+      # org         = (b'organisation', parse_properties(block, b'org'))
+      # mntby       = (b'mntner', parse_properties(block, b'mnt-by'))
+      # mntlowers   = (b'mntner', parse_properties(block, b'mnt-lower'))
+      # adminc      = (b'mntner', parse_properties(block, b'admin-c'))
+      # techc       = (b'mntner', parse_properties(block, b'tech-c'))
+      # abusec      = (b'mntner', parse_properties(block, b'abuse-c'))
+        
+      # # Emails and local stuff
+      # notifys     = (b'e-mail', parse_properties(block, b'notify'))
+      # members = routes_members = autnums_members = (None, [])
+      
+      # if asset:
+        # members     = (b'aut-num', parse_properties(block, b'members'))
       # else:
         # # route-set contains a mix of aut-num and routes (CIDR), just great...
-        # # TODO: identify each value and create 2 lists one for each type
-        # mbrsbyref = (None, [])
-        # # mbrsbyref   = (b'organisation', parse_properties(block, b'mbrs-by-ref'))
-      org         = (b'organisation', parse_properties(block, b'org'))
-      mntby       = (b'mntner', parse_properties(block, b'mnt-by'))
-      mntlowers   = (b'mntner', parse_properties(block, b'mnt-lower'))
-      adminc      = (b'mntner', parse_properties(block, b'admin-c'))
-      techc       = (b'mntner', parse_properties(block, b'tech-c'))
-      abusec      = (b'mntner', parse_properties(block, b'abuse-c'))
-        
-      # Emails and local stuff
-      notifys     = (b'e-mail', parse_properties(block, b'notify'))
-      if asset:
-        members     = (b'aut-num', parse_properties(block, b'members'))
-      else:
-        # route-set contains a mix of aut-num and routes (CIDR), just great...
-        # TODO: identify each value and create 2 lists one for each type: DONE
-        members     = (None, [])
-        routes, autnums = partition(lambda x: re.search(rb'([0-9a-fA-F:\.]+/{1,3})', x), parse_properties(block, b'members'))
-        if routes:
-          routes_members = (b'route', routes)
-        else:
-          routes_members = (None, [])
-        if autnums:
-          autnums_members = (b'aut-num', autnums)
-        else:
-          autnums_members = (None, [])
+        # # TODO: identify each value and create 2 lists one for each type: DONE
+        # routes, autnums = partition(lambda x: re.search(rb'([0-9a-fA-F:\.]+/{1,3})', x), parse_properties(block, b'members'))
+        # print('routes',routes)
+        # print('autnums',autnums)
+        # if routes:
+          # routes_members = (b'route', routes)
+        # if autnums:
+          # autnums_members = (b'aut-num', autnums)
       
-      b = BlockObject(name=name, object=object, description=description, remarks=remarks)
-      session.add(b)
-      counter, commit = updateCounter(counter, commit)
+      # b = BlockObject(name=name, object=object, description=description, remarks=remarks)
+      # session.add(b)
+      # counter = updateCounter(counter)
       
-      # inverse keys:
-      for parent_type, parents in [mbrsbyref, org, mntby, mntlowers, adminc, techc, abusec]:
-        for parent in parents:
-          b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
-          session.add(b)
-          counter, commit = updateCounter(counter, commit)
+      # # inverse keys:
+      # for parent_type, parents in [org, mntby, mntlowers, adminc, techc, abusec]:
+        # for parent in parents:
+          # try:
+            # b = BlockParent(parent=parent, parent_type=parent_type, child=name, child_type=object)
+            # session.add(b)
+            # counter = updateCounter(counter)
+            # session.flush()
+          # except SQLAlchemyError as e:
+            # error = str(e.__dict__['orig'])
+            # print(type(e), error)
       
-      # local keys:
-      for child_type, children in [notifys, members, routes_members, autnums_members]:
-        for child in children:
-          b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
-          session.add(b)
-          counter, commit = updateCounter(counter, commit)
+      # # local keys:
+      # for child_type, children in [notifys, members, routes_members, autnums_members]:
+        # for child in children:
+          # try:
+            # b = BlockParent(parent=name, parent_type=object, child=child, child_type=child_type)
+            # session.add(b)
+            # counter = updateCounter(counter)
+            # session.flush()
+          # except SQLAlchemyError as e:
+            # error = str(e.__dict__['orig'])
+            # print(type(e), error)
     
     
-    BLOCKS_DONE += 1
+    blocks_done += 1
     # we do many more sessions for each block because of the parent table and will inevitably pass the mark
     # counter += 1
     # if counter % COMMIT_COUNT == 0:
-    if commit:
-      commit = False
-      session.commit()
-      session.close()
-      session = setup_connection(connection_string)
-      # not really accurate at the moment
-      percent = (BLOCKS_DONE * NUM_WORKERS * 100) / NUM_BLOCKS
-      if percent > 100:
+    if TIME2COMMIT:
+      TIME2COMMIT = False
+      try:
+        # session.flush()
+        session.commit()
+      except SQLAlchemyError as e:
+        print(type(e), e)
+      # session.flush()
+      # session.close()
+      # session = setup_connection(connection_string)
+      
+      percent = (blocks_done * NUM_WORKERS * 100) / NUM_BLOCKS
+      if percent >= 100:
         percent = 100
-      logger.debug('committed {} blocks ({} seconds) {:.1f}% done.'.format(
-        counter, round(time.time() - start_time, 2), percent))
-      counter = 0
+      logger.debug('committed {} blocks ({} seconds) {:.1f}% done, ignored {} duplicates'.format(
+        counter, round(time.time() - start_time, 2), percent, duplicates))
       start_time = time.time()
+    # /block
+  # /while true
   
   session.commit()
   logger.debug('committed last blocks')
@@ -805,7 +868,10 @@ def main(connection_string):
 
       logger.info(
         f"block parsing finished: {round(time.time() - start_time, 2)} seconds")
-      os.rename(f"./downloads/{entry}", f"./downloads/done/{entry}")
+      try:
+        os.rename(f"./downloads/{entry}", f"./downloads/done/{entry}")
+      except Exception as error:
+        print(error)
     else:
       logger.info(
         f"File {f_name} not found. Please download using download_dumps.sh")
