@@ -10,4 +10,26 @@ DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 cd $DIR/../
 
-docker-compose run -e PGPASSWORD=whoisd --entrypoint=psql db -h whoisd-db -U whoisd -x whoisd
+if [ $# -eq 0 ]; then
+  echo './bin/psql -c "select count(*) from cidr;"'
+  echo './bin/psql -c "select count(*) from parent;"'
+fi
+
+docker-compose run -e PGPASSWORD=whoisd --entrypoint=psql db -h whoisd-db -U whoisd -x whoisd "$@"
+
+
+# SELECT * FROM pg_tables
+# ;
+
+# SELECT * FROM parent
+# SELECT count(*) FROM parent
+# where 1=1
+# and parent='LEASE'
+# and parent_type='mntner'
+# and child='NORWICH'
+# and child_type='inetnum'
+# limit 5
+# ;
+# MNT, mntner, NATPARKNET, inetnum
+# INSERT INTO parent (parent, parent_type, child, child_type) VALUES ('MNT', 'mntner', 'NORWICH', 'inetnum');
+# INSERT INTO parent (parent, parent_type, child, child_type) VALUES ('LEASE', 'mntner', '23.19.53.0/24', 'route');

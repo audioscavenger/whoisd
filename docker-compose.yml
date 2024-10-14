@@ -12,7 +12,7 @@ services:
       PUID: 1000
       PGID: 1000
       # to manually force a rebuild: REBUILD=true ./bin/whoisd
-      # REBUILD: true
+      REBUILD: true
     build:
       context: .
     command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug
@@ -22,9 +22,10 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /docker/whoisd/downloads:/app/downloads
     depends_on:
-      db:
-        condition: service_healthy
-        restart: true
+      - db
+      # db:
+        # condition: service_healthy
+        # restart: true
     restart: no
     security_opt:
       - no-new-privileges:true
@@ -67,7 +68,9 @@ services:
       # whoisd-db  | 2024-10-06 01:05:55.937 UTC [525] FATAL:  role "root" does not exist
       # whoisd-db  | 2024-10-06 01:06:26.001 UTC [533] FATAL:  role "root" does not exist
       # https://github.com/peter-evans/docker-compose-healthcheck/issues/16
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
+      # docker exec whoisd-db pg_isready -U whoisd -d whoisd
+      # test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]          # this bugs out sometimes
+      test: ["CMD-SHELL", "pg_isready -U whoisd -d whoisd" ]
       interval: 30s
       timeout: 10s
       retries: 5

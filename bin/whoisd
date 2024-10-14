@@ -11,13 +11,23 @@ DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 echo DEBUG: cd $DIR/../
 cd $DIR/../
 if [[ -n "$REBUILD" ]]; then
+  python -m create_db.py 2>&1 | grep -B 5 SyntaxError && exit 1
+  echo docker-compose stop
   docker-compose stop
+  echo docker container rm whoisd
+  docker container rm whoisd
+  echo docker image rm whoisd
   docker image rm whoisd
+  echo docker pull python:3-alpine
   docker pull python:3-alpine
+  echo docker pull postgres:13-alpine
   docker pull postgres:13-alpine
+  echo docker-compose build
   docker-compose build
 fi
 
 echo docker-compose -f docker-compose.yml run --rm --service-ports whoisd "$@"
 docker-compose -f docker-compose.yml run --rm --service-ports whoisd "$@"
+
+# echo docker-compose -f docker-compose.yml up -d "$@"
 # docker-compose -f docker-compose.yml up -d "$@" && docker-compose logs --tail=25 -f

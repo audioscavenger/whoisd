@@ -240,7 +240,7 @@ TODO:
 
 ## version: 2.0.5
 
-- 2.0.5 WIP to get new database inserts working: inetnum works
+- 2.0.5 WIP moving away from byte storage
 - 2.0.4 WIP to get new database inserts working: inetnum works
 - 2.0.3 [x] fix the bug where the whoisd build output is invisible - it fixed itself
 - 2.0.2 download_dumps.sh does not re-download existing databases

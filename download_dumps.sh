@@ -33,4 +33,4 @@ download "https://ftp.arin.net/pub/rr/arin.db.gz"
 # download "https://ftp.ripe.net/ripe/dbase/split/ripe.db.inetnum.gz"
 # download "https://ftp.ripe.net/ripe/dbase/split/ripe.db.inet6num.gz"
 
-# download "https://ftp.afrinic.net/dbase/afrinic.db.gz"
+download "https://ftp.afrinic.net/dbase/afrinic.db.gz"
