@@ -238,8 +238,9 @@ TODO:
 - [ ] replace all binstubs commands with demonized compose
 - [ ] Start charging for my hard work?
 
-## version: 2.0.5
+## version: 2.0.6
 
+- 2.0.6 WIP now storing strings and not bytes
 - 2.0.5 WIP moving away from byte storage
 - 2.0.4 WIP to get new database inserts working: inetnum works
 - 2.0.3 [x] fix the bug where the whoisd build output is invisible - it fixed itself
