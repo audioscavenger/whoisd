@@ -10,14 +10,14 @@ from sqlalchemy.sql import func
 Base = get_base()
 
 
-# inetnum=str(cidr), object=b'inetnum', netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source
+# inetnum=str(cidr), attr=b'inetnum', netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source
 # BlockCidr: inetnum, route
 class BlockCidr(Base):
   __tablename__ = 'cidr'
   # id = Column(Integer, primary_key=True)
   # inetnum = Column(postgresql.CIDR, nullable=False, index=True)
   inetnum = Column(postgresql.CIDR, primary_key=True)
-  object = Column(String, nullable=False, index=True)
+  attr =  Column(String, nullable=False, index=True)
   netname = Column(String, nullable=True, index=True)
   autnum = Column(String, index=True)
   description = Column(String)
@@ -33,18 +33,18 @@ class BlockCidr(Base):
   )
   
   def __str__(self):
-    return f'inetnum: {self.inetnum}, object: {self.object}, netname: {self.netname}, autnum: {self.autnum}, desc: {self.description}, remarks: {self.remarks}, country: {self.country}, created: {self.created}, last_modified: {self.last_modified}, status: {self.status}, source: {self.source}'
+    return f'inetnum: {self.inetnum}, attr: {self.attr}, netname: {self.netname}, autnum: {self.autnum}, desc: {self.description}, remarks: {self.remarks}, country: {self.country}, created: {self.created}, last_modified: {self.last_modified}, status: {self.status}, source: {self.source}'
   
   def __repr__(self):
     return self.__str__()
 
 # BlockMember: mntner, person, role, organisation, irt
-# id=id, object=object, name=name, description=description, remarks=remarks
+# id=id, attr=attr, name=name, description=description, remarks=remarks
 class BlockMember(Base):
   __tablename__ = 'member'
   # id = Column(Integer, primary_key=True)
   id = Column(String, primary_key=True)
-  object = Column(String, nullable=False, index=True)
+  attr =  Column(String, nullable=False, index=True)
   name = Column(String, nullable=False, index=True)
   description = Column(String)
   remarks = Column(String)
@@ -54,27 +54,27 @@ class BlockMember(Base):
   )
   
   def __str__(self):
-    return f'id: {self.id}, object: {self.object}, name: {self.name}, description: {self.description}, remarks: {self.remarks}'
+    return f'id: {self.id}, attr: {self.attr}, name: {self.name}, description: {self.description}, remarks: {self.remarks}'
   
   def __repr__(self):
     return self.__str__()
 
 # BlockObject: aut-num, as-set, route-set, domain
-# name=name, object=object, description=description, remarks=remarks
+# name=name, attr=attr, description=description, remarks=remarks
 class BlockObject(Base):
-  __tablename__ = 'object'
+  __tablename__ = 'attr'
   id = Column(Integer, primary_key=True)
   name = Column(String, nullable=False, index=True)
-  object = Column(String, nullable=False, index=True)
+  attr =  Column(String, nullable=False, index=True)
   description = Column(String)
   remarks = Column(String, index=True)
   
   __table_args__ = (
-    Index('ix_object_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), 
+    Index('ix_attr_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), 
   )
   
   def __str__(self):
-    return f'name: {self.name}, object: {self.object}, description: {self.description}, remarks: {self.remarks}'
+    return f'name: {self.name}, attr: {self.attr}, description: {self.description}, remarks: {self.remarks}'
   
   def __repr__(self):
     return self.__str__()

@@ -12,10 +12,10 @@ echo DEBUG: cd $DIR/../
 cd $DIR/../
 if [[ -n "$REBUILD" ]]; then
   python -m create_db.py 2>&1 | grep -B 5 SyntaxError && exit 1
-  echo docker-compose stop
-  docker-compose stop
-  echo docker container rm whoisd
-  docker container rm whoisd
+  # echo docker-compose stop
+  # docker-compose stop
+  # echo docker container rm whoisd
+  # docker container rm whoisd
   echo docker image rm whoisd
   docker image rm whoisd
   echo docker pull python:3-alpine

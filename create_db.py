@@ -34,7 +34,9 @@
 import argparse
 import gzip
 import time
-from multiprocessing import cpu_count, Queue, Process, current_process
+from multiprocessing import cpu_count, Queue, Process, Lock, current_process
+# https://docs.python.org/2/library/multiprocessing.html#multiprocessing.sharedctypes.Value
+from multiprocessing.sharedctypes import Value
 import logging
 import re
 import os
@@ -53,7 +55,6 @@ NUM_WORKERS = cpu_count()
 LOG_FORMAT = '%(asctime)-15s - %(name)-9s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
 COMMIT_COUNT = 10000
 MODULO = 10000
-TIME2COMMIT = False
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
 
@@ -73,6 +74,24 @@ stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 
+
+# https://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing#the-right-way
+class Counter(object):
+  def __init__(self, initval=0):
+    self.val = Value('i', initval)
+    self.lock = Lock()
+  
+  def increment(self):
+    with self.lock:
+      self.val.value += 1
+  
+  def decrement(self):
+    with self.lock:
+      self.val.value -= 1
+  
+  def value(self):
+    with self.lock:
+      return self.val.value
 
 
 def get_source(filename: str):
@@ -177,7 +196,7 @@ def parse_property_inetnum(block: str):
   
   # no sir, a route is not an inet. 
   # route: specifies the IPv4 address prefix of the route. 
-  # Together with the "origin:" attribute, these constitute a combined primary key of the route object. 
+  # Together with the "origin:" attribute, these constitute a combined primary key of the route attr. 
   # The address can only be specified as a prefix. It can be one or more IP addresses.
   # HOWEVER... we will combine them in cidr table as our goal is to identify an IP not reverse-engineer ARPA databases
     
@@ -221,8 +240,7 @@ def read_blocks(filepath: str) -> list:
           single_block += b"cust_source: %s" % (cust_source.encode('utf-8'))
           blocks.append(single_block)
           if len(blocks) % MODULO == 0:
-            logger.debug(
-              f"parsed another {MODULO} blocks ({len(blocks)} so far, ignored {ignored_blocks} blocks)")
+            logger.debug(f"read_blocks: another {MODULO} blocks so far, Kept ({len(blocks)} blocks, Ignored {ignored_blocks} blocks, ")
           single_block = b''
           # comment out to only parse x blocks
           # if len(blocks) == 100:
@@ -233,19 +251,19 @@ def read_blocks(filepath: str) -> list:
           ignored_blocks += 1
       else:
         single_block += line
-  logger.info(f"Total {len(blocks) + ignored_blocks} blocks: Parsed {len(blocks)} blocks, ignored {ignored_blocks} blocks")
+  logger.info(f"read_blocks: Kept {len(blocks)} blocks + Ignored {ignored_blocks} blocks = Total {len(blocks) + ignored_blocks} blocks")
   global NUM_BLOCKS
   NUM_BLOCKS = len(blocks)
   return blocks
 
 
-def updateCounter(counter: int):
-  # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
-  global TIME2COMMIT
-  if not TIME2COMMIT:
-    if counter % COMMIT_COUNT == 0:
-      TIME2COMMIT = True
-  return counter + 1
+# def updateCounter(counter: int, TIME2COMMIT: bool):
+  # # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
+  # global TIME2COMMIT    # apparently that does not work if TIME2COMMIT is defined within parse_block??
+  # if not TIME2COMMIT:
+    # if counter % COMMIT_COUNT == 0:
+      # TIME2COMMIT = True
+  # return counter + 1
 
 def updateCounterLocal(counter: int, time2commit: bool):
   # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
@@ -254,7 +272,7 @@ def updateCounterLocal(counter: int, time2commit: bool):
       time2commit = True
   return (counter + 1), time2commit
 
-      # # global variable update is apparently faster then returning 2 variables
+      # # global variable update is apparently a bit faster then returning 2 variables
       # import timeit
       # TIME2COMMIT = False
       # counter = 0
@@ -284,14 +302,16 @@ def partition(pred, iterable):
   return trues, falses
 
 
-def parse_blocks(jobs: Queue, connection_string: str):
+def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, blocks_skipped_total):
   session = setup_connection(connection_string)
 
-  counter = 0
-  duplicates = 0
-  blocks_done = 0
-  global TIME2COMMIT
+  # all the value below are PER WORKER
+  inserts = 0             # inserted rows only
+  duplicates = 0          # rollbacked rows
+  blocks_processed = 0    # processed rows: bypassed, added, and rollbacked
+  TIME2COMMIT = False
 
+  seconds_total = 0
   start_time = time.time()
   while True:
     block = jobs.get()
@@ -357,7 +377,7 @@ def parse_blocks(jobs: Queue, connection_string: str):
     # ping-hdl:       optional   multiple   inverse key
     # holes:          optional   multiple   
     # org:            optional   multiple   inverse key
-    # member-of:      optional   multiple   inverse key     <- must match mbrs-by-ref in referenced object
+    # member-of:      optional   multiple   inverse key     <- must match mbrs-by-ref in referenced attr
     # inject:         optional   multiple   
     # aggr-mtd:       optional   single     
     # aggr-bndry:     optional   single     
@@ -378,21 +398,21 @@ def parse_blocks(jobs: Queue, connection_string: str):
       # INETNUM netname: is a name given to a range of IP address space. A netname is made up of letters, digits, the underscore character and the hyphen character. The first character of a name must be a letter, and the last character of a name must be a letter or a digit. It is recommended that the same netname be used for any set of assignment ranges used for a common purpose, such as a customer or service.
       netname = parse_property(block, b'netname')
       if netname:
-        object='inetnum'
+        attr='inetnum'
       else:
         # we need to be able to reference routes with aut-num as they have no name
         # netname = route = 1.1.1.0/24
         netname = inetnum[0].decode('utf-8')
-        object='route'
+        attr='route'
       
-      # ROUTE origin: is AS Number of the Autonomous System that originates the route into the interAS routing system. The corresponding aut-num object for this Autonomous System may not exist in the RIPE Database.
+      # ROUTE origin: is AS Number of the Autonomous System that originates the route into the interAS routing system. The corresponding aut-num attr for this Autonomous System may not exist in the RIPE Database.
       origin = parse_property(block, b'origin')
       
       description = parse_property(block, b'descr')
       remarks = parse_property(block, b'remarks')
       
       country = parse_property(block, b'country')
-      # if we have a city object, append it to the country
+      # if we have a city attr, append it to the country
       # we likely will never have one, instead they can be found in remarks
       # city = parse_property(block, b'city')
       
@@ -429,75 +449,78 @@ def parse_blocks(jobs: Queue, connection_string: str):
             if month >= 1 and month <=12 and day >= 1 and day <= 31:
               last_modified = f"{year}-{month}-{day}"
             else:
-              logger.debug(f"ignoring invalid changed date {date} ({counter})")
+              logger.debug(f"ignoring invalid changed date {date} ({attr} {inetnum[0].decode('utf-8')} block={blocks_processed - 1})")
           else:
-            logger.debug(f"ignoring invalid changed date {date} ({counter})")
+            logger.debug(f"ignoring invalid changed date {date} ({attr} {inetnum[0].decode('utf-8')} block={blocks_processed - 1})")
         elif "@" in changed:
           # email in changed field without date
-          logger.debug(f"ignoring invalid changed date {changed} ({counter})")
+          logger.debug(f"ignoring invalid changed date {changed} ({attr} {inetnum[0].decode('utf-8')} block={blocks_processed - 1})")
         else:
           last_modified = changed
       status = parse_property(block, b'status')
       
       # https://stackoverflow.com/questions/2136739/error-handling-in-sqlalchemy
       # https://stackoverflow.com/questions/32461785/sqlalchemy-check-before-insert-in-python
-      # logger.debug('----------------------------------------------------- for cidr in inetnum: %s --- % object')
+      # logger.debug('----------------------------------------------------- for cidr in inetnum: %s --- % attr')
       for cidr in inetnum:
-        # session.flush()
+        # session.flush()   # seems redundant
         try:
-          # logger.debug('counter1: %d %s' % (counter,cidr.decode('utf-8')))
-          b = BlockCidr(inetnum=cidr.decode('utf-8'), object=object, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
-          # logger.debug('counter2: %d' % counter)
+          # logger.debug('counter1: %d %s' % (inserts, cidr.decode('utf-8')))
+          b = BlockCidr(inetnum=cidr.decode('utf-8'), attr=attr, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
+          # logger.debug('counter2: %d' % inserts)
           session.add(b)
-          # logger.debug('counter3: %d' % counter)
+          # logger.debug('counter3: %d' % inserts)
           session.flush()
-          # logger.debug('counter4: %d' % counter)
-          counter = updateCounter(counter)
-          # logger.debug('counter5: %d' % counter)
-        # except SQLAlchemyError as e:
-        except Exception as e:
-          counter -=1
+          # logger.debug('counter4: %d' % inserts)
+          # inserts = updateCounter(inserts)
+          inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+          # inserts += 1
+          # logger.debug('counter5: %d' % inserts)
+        except SQLAlchemyError as e:
           duplicates +=1
+          blocks_skipped_total.increment()
           session.rollback()
-          # logger.debug('counter6: %d: %s' % (counter, type(e))) #  <class 'sqlalchemy.exc.IntegrityError'>
-          # logger.debug('     -1 : %d: %s' % (counter, e.__class__.__name__))
-          # logger.debug('     -1 : %d: %s' % (counter, e))
+          # logger.debug('counter6: %d: %s' % (inserts, type(e))) #  <class 'sqlalchemy.exc.IntegrityError'>
+        except Exception as e:
+          logger.debug('     -1 : %d: %s' % (inserts, e.__class__.__name__))
     
-      # logger.debug('----------------------------------------------------- for parent in parents: %s --- % object')
+      # # logger.debug('----------------------------------------------------- for parent in parents: %s --- % attr')
       # # inverse keys:
       # for parent_type, parents in [mntby, memberof, org, mntlowers, mntroutes, mntdomains, mntnfy, mntirt, adminc, techc, abusec, notifys]:
         # for parent in parents:
           # session.flush()
           # try:
-            # logger.debug('parents: %d VALUES ("%s","%s","%s","%s")' % (counter,parent,parent_type,netname,object))
-            # b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
+            # # logger.debug('parents: %d VALUES ("%s","%s","%s","%s")' % (inserts,parent,parent_type,netname,attr))
+            # b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=attr)
             # session.add(b)
-            # # session.flush()
-            # counter = updateCounter(counter)
-          # # except SQLAlchemyError as e:
-          # except Exception as e:
-            # counter -=1
+            # session.flush()
+            # inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+            # # inserts += 1
+          # except SQLAlchemyError as e:
             # duplicates +=1
+            # blocks_skipped_total.increment()
             # session.rollback()
-            # logger.debug('     -1 : %d: %s' % (counter, e.__class__.__name__))
+          # except Exception as e:
+            # logger.debug('     -1 : %d: %s' % (inserts, e.__class__.__name__))
       
-      # logger.debug('----------------------------------------------------- for child in children: %s --- % object')
+      # # logger.debug('----------------------------------------------------- for child in children: %s --- % attr')
       # # local keys:
       # for child_type, children in [notifys]:
         # for child in children:
           # session.flush()
           # try:
-            # logger.debug('children: %d VALUES ("%s","%s","%s","%s")' % (counter,netname,object,child,child_type))
-            # b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
+            # # logger.debug('children: %d VALUES ("%s","%s","%s","%s")' % (inserts,netname,attr,child,child_type))
+            # b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
             # session.add(b)
-            # # session.flush()
-            # counter = updateCounter(counter)
-          # # except SQLAlchemyError as e:
-          # except Exception as e:
-            # counter -=1
+            # session.flush()
+            # inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+            # # inserts += 1
+          # except SQLAlchemyError as e:
             # duplicates +=1
+            # blocks_skipped_total.increment()
             # session.rollback()
-            # logger.debug('     -1 : %d: %s' % (counter, e.__class__.__name__))
+          # except Exception as e:
+            # logger.debug('     -1 : %d: %s' % (inserts, e.__class__.__name__))
     
     
     
@@ -609,22 +632,22 @@ def parse_blocks(jobs: Queue, connection_string: str):
     # if mntner or person or role or organisation or irt:
       # if mntner:
         # id = name = mntner
-        # object = 'mntner'
+        # attr = 'mntner'
       # if person:
         # id = parse_property(block, b'nic-hdl')
         # name = person
-        # object = 'person'
+        # attr = 'person'
       # if role:
         # id = parse_property(block, b'nic-hdl')
         # name = role
-        # object = 'role'
+        # attr = 'role'
       # if organisation:
         # id = organisation
         # name = parse_property(block, b'org-name')
-        # object = 'organisation'
+        # attr = 'organisation'
       # if irt:
         # id = name = irt
-        # object = 'irt'
+        # attr = 'irt'
         
       # description = parse_property(block, b'descr')
       # remarks     = parse_property(block, b'remarks')
@@ -648,17 +671,17 @@ def parse_blocks(jobs: Queue, connection_string: str):
       # refnfys     =   ('e-mail', parse_properties(block, b'ref-nfy'))
       # updtos      =   ('e-mail', parse_properties(block, b'upd-to'))
       
-      # b = BlockCidr(id=id, object=object, name=name, description=description, remarks=remarks)
+      # b = BlockCidr(id=id, attr=attr, name=name, description=description, remarks=remarks)
       # session.add(b)
-      # counter = updateCounter(counter)
+      # inserts = updateCounter(inserts)
       
       # # inverse keys:
       # for parent_type, parents in [org, mntby, adminc, techc, abusec, mntnfys, mntrefs]:
         # for parent in parents:
           # try:
-            # b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=object)
+            # b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=attr)
             # session.add(b)
-            # counter = updateCounter(counter)
+            # inserts = updateCounter(inserts)
             # session.flush()
           # except SQLAlchemyError as e:
             # error = str(e.__dict__['orig'])
@@ -668,9 +691,9 @@ def parse_blocks(jobs: Queue, connection_string: str):
       # for child_type, children in [address, phone, notifys, irtnfys, emails, refnfys, updtos]:
         # for child in children:
           # try:
-            # b = BlockParent(parent=netname, parent_type=object, child=child, child_type=child_type)
+            # b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
             # session.add(b)
-            # counter = updateCounter(counter)
+            # inserts = updateCounter(inserts)
             # session.flush()
           # except SQLAlchemyError as e:
             # error = str(e.__dict__['orig'])
@@ -762,16 +785,16 @@ def parse_blocks(jobs: Queue, connection_string: str):
     # if autnum or asset or routeset or domain:
       # if autnum:
         # name = autnum
-        # object = 'aut-num'
+        # attr = 'aut-num'
       # if asset:
         # name = asset
-        # object = 'as-set'
+        # attr = 'as-set'
       # if routeset:
         # name = routeset
-        # object = 'route-set'
+        # attr = 'route-set'
       # if domain:
         # name = domain
-        # object = 'domain'
+        # attr = 'domain'
         
       # description = parse_property(block, b'descr')
       # remarks     = parse_property(block, b'remarks')
@@ -808,17 +831,17 @@ def parse_blocks(jobs: Queue, connection_string: str):
         # if autnums:
           # autnums_members = ('aut-num', autnums)
       
-      # b = BlockObject(name=name, object=object, description=description, remarks=remarks)
+      # b = BlockObject(name=name, attr=attr, description=description, remarks=remarks)
       # session.add(b)
-      # counter = updateCounter(counter)
+      # inserts = updateCounter(inserts)
       
       # # inverse keys:
       # for parent_type, parents in [org, mntby, mntlowers, adminc, techc, abusec]:
         # for parent in parents:
           # try:
-            # b = BlockParent(parent=parent, parent_type=parent_type, child=name, child_type=object)
+            # b = BlockParent(parent=parent, parent_type=parent_type, child=name, child_type=attr)
             # session.add(b)
-            # counter = updateCounter(counter)
+            # inserts = updateCounter(inserts)
             # session.flush()
           # except SQLAlchemyError as e:
             # error = str(e.__dict__['orig'])
@@ -828,21 +851,35 @@ def parse_blocks(jobs: Queue, connection_string: str):
       # for child_type, children in [notifys, members, routes_members, autnums_members]:
         # for child in children:
           # try:
-            # b = BlockParent(parent=name, parent_type=object, child=child, child_type=child_type)
+            # b = BlockParent(parent=name, parent_type=attr, child=child, child_type=child_type)
             # session.add(b)
-            # counter = updateCounter(counter)
+            # inserts = updateCounter(inserts)
             # session.flush()
           # except SQLAlchemyError as e:
             # error = str(e.__dict__['orig'])
             # print(type(e), error)
     
     
-    blocks_done += 1
-    # we do many more sessions for each block because of the parent table and will inevitably pass the mark
-    # counter += 1
-    # if counter % COMMIT_COUNT == 0:
+    blocks_processed += 1
+    # wrong:    https://docs.python.org/3/library/multiprocessing.html#multiprocessing.Value
+    # blocks_processed_total.value() += 1
+    # wrong:    https://stackoverflow.com/questions/2080660/how-to-increment-a-shared-counter-from-multiple-processes
+    # with inserts.get_lock():
+      # blocks_processed_total.value() += 1
+    # still wrong:  https://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing#the-right-way
+    # with lock:
+      # blocks_processed_total.value() += 1
+    # https://docs.python.org/2/library/multiprocessing.html#multiprocessing.sharedctypes.Value
+    # blocks_processed_total.value() += 1
+    blocks_processed_total.increment()
+    
+    # We do many more loops for each block because of the parent table, also we decrement it sometimes, and will inevitably pass the mark. cannot use counter inserts here:
+    # if inserts % COMMIT_COUNT == 0:
+    # Using a function to increment inserts, that updates a global variable TIME2COMMIT works better when there are more INSERTs then blocks
     if TIME2COMMIT:
       TIME2COMMIT = False
+    # Using a separate counter: inserts for actually added rows makes sense when updating the database, but less sense when building it. Lots of work for little results.
+    # if blocks_processed % COMMIT_COUNT == 0:
       try:
         # session.flush()
         session.commit()
@@ -854,16 +891,22 @@ def parse_blocks(jobs: Queue, connection_string: str):
       # session.close()
       # session = setup_connection(connection_string)
       
-      percent = (blocks_done * NUM_WORKERS * 100) / NUM_BLOCKS
+      # each work will perform roughly the same number of blocks, but this number will never be the same
+      # therefore blocks_processed * NUM_WORKERS will NEVER be == NUM_BLOCKS
+      # percent = (blocks_processed * NUM_WORKERS * 100) / NUM_BLOCKS
+      percent = (blocks_processed_total.value() * 100) / NUM_BLOCKS
       if percent >= 100:
         percent = 100
-      logger.debug('committed {}/{}/{} blocks ({} seconds) {:.1f}% done, ignored {} duplicates'.format(counter, blocks_done, NUM_BLOCKS, round(time.time() - start_time, 2), percent, duplicates))
+      seconds = round(time.time() - start_time, 2)
+      seconds_total += seconds
+      logger.debug('committed {}/{}/{} blocks ({} seconds) {:.1f}% done, ignored {}/{} duplicates/total ({} inserts/s)'.format(inserts, blocks_processed, blocks_processed_total.value(), seconds, percent, duplicates, blocks_skipped_total.value(), round(inserts / seconds_total)))
       start_time = time.time()
     # /block
   # /while true
   
   session.commit()
-  logger.debug(f'{current_process().name} finished: {blocks_done} blocks total')
+  seconds_total += round(time.time() - start_time, 2)
+  logger.debug(f'{current_process().name} finished: {blocks_processed} blocks total ({round(seconds_total)} seconds) ({round(blocks_processed / seconds_total)} blocks/s)')
   session.close()
 
 
@@ -877,28 +920,38 @@ def main(connection_string):
     CURRENT_FILENAME = entry
     f_name = f"./downloads/{entry}"
     if os.path.exists(f_name):
-      logger.info(f"parsing database file: {f_name}")
+      logger.info(f"loading database file: {f_name}")
       start_time = time.time()
       blocks = read_blocks(f_name)
-      logger.info(f"database parsing finished: {round(time.time() - start_time, 2)} seconds")
-
-      logger.info('parsing blocks')
+      seconds = round(time.time() - start_time, 2)
+      seconds_total = seconds
+      logger.info(f"file loading finished: {seconds} seconds ({round(NUM_BLOCKS / seconds)} blocks/s)")
       start_time = time.time()
 
       jobs = Queue()
+      # lock = Lock()
+      # blocks_processed_total = Value('i', 0, lock=lock)
+      # blocks_skipped_total = Value('i', 0, lock=lock)
+      # Classes seem faster
+      blocks_processed_total = Counter(0)
+      blocks_skipped_total = Counter(0)
 
       workers = []
       # start workers
-      logger.debug(f"starting {NUM_WORKERS} processes")
+      logger.info(f"BLOCKS PARSING START: starting {NUM_WORKERS} processes for {NUM_BLOCKS} blocks (~{round(NUM_BLOCKS/NUM_WORKERS)} per worker)")
       for _ in range(NUM_WORKERS):
-        p = Process(target=parse_blocks, args=(
-          jobs, connection_string,), daemon=True)
+        p = Process(target=parse_blocks, args=(jobs, connection_string, blocks_processed_total, blocks_skipped_total), daemon=True)
         p.start()
         workers.append(p)
 
       # add tasks
       for b in blocks:
         jobs.put(b)
+      seconds = round(time.time() - start_time, 2)
+      seconds_total += seconds
+      logger.info(f"blocks load into workers finished: {seconds} seconds")
+      start_time = time.time()
+
       for _ in range(NUM_WORKERS):
         jobs.put(None)
       jobs.close()
@@ -908,8 +961,9 @@ def main(connection_string):
       for p in workers:
         p.join()
 
-      logger.info(
-        f"block parsing finished: {round(time.time() - start_time, 2)} seconds")
+      seconds = round(time.time() - start_time, 2)
+      seconds_total += seconds
+      logger.info(f"BLOCKS PARSING DONE: {round(seconds_total)} seconds ({round(NUM_BLOCKS / seconds_total)} blocks/s) for {NUM_BLOCKS} blocks")
       try:
         os.rename(f"./downloads/{entry}", f"./downloads/done/{entry}")
       except Exception as error:
@@ -1463,3 +1517,62 @@ if __name__ == '__main__':
 # (Background on this error at: https://sqlalche.me/e/20/gkpj)
 
 
+# docker-compose -f docker-compose.yml run --rm --service-ports whoisd
+# [+] Creating 1/0
+ # ✔ Container whoisd-db  Created                                                                                                                                                                         0.0s
+# [+] Running 1/1
+ # ✔ Container whoisd-db  Started                                                                                                                                                                         0.2s
+# pwd=/app
+# whoami=uid=1000(app) gid=1000(app) groups=1000(app)
+# ./download_dumps.sh
+# SKIP: arin.db.gz
+# SKIP: afrinic.db.gz
+# /app/create_db.py -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug
+# 2024-10-15 03:13:02,970 - create_db - INFO     - MainProcess 14 - afrinic.db.gz - File ./downloads/afrinic.db.gz not found. Please download using download_dumps.sh
+# 2024-10-15 03:13:02,971 - create_db - INFO     - MainProcess 14 - apnic.db.inetnum.gz - File ./downloads/apnic.db.inetnum.gz not found. Please download using download_dumps.sh
+# 2024-10-15 03:13:02,971 - create_db - INFO     - MainProcess 14 - arin.db.gz - parsing database file: ./downloads/arin.db.gz
+# 2024-10-15 03:13:03,332 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (10000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:03,421 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (20000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:03,525 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (30000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:03,618 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (40000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:03,719 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (50000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:03,818 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (60000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:03,911 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (70000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:04,048 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (80000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:04,152 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (90000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:04,248 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (100000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:04,342 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (110000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:04,449 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (120000 so far, ignored 0 blocks)
+# 2024-10-15 03:13:04,622 - create_db - INFO     - MainProcess 14 - arin.db.gz - Total 124320 blocks: Parsed 124320 blocks, ignored 0 blocks
+# 2024-10-15 03:13:04,623 - create_db - INFO     - MainProcess 14 - arin.db.gz - file parsing finished: 1.65 seconds
+# 2024-10-15 03:13:04,623 - create_db - INFO     - MainProcess 14 - arin.db.gz - parsing blocks
+# 2024-10-15 03:13:04,648 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - starting 4 processes
+# 2024-10-15 03:13:04,858 - create_db - INFO     - MainProcess 14 - arin.db.gz - blocks load into workers finished: 0.24 seconds
+# 2024-10-15 03:13:05,135 - create_db - DEBUG    - Process-3   17 - arin.db.gz - committed 1/2089/8116 blocks (0.47 seconds) 6.5% done, ignored 0 duplicates
+# 2024-10-15 03:13:05,135 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 1/1549/8116 blocks (0.47 seconds) 6.5% done, ignored 0 duplicates
+# 2024-10-15 03:13:05,138 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 1/2272/8119 blocks (0.48 seconds) 6.5% done, ignored 0 duplicates
+# 2024-10-15 03:13:05,144 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 1/2348/8132 blocks (0.49 seconds) 6.5% done, ignored 0 duplicates
+# 2024-10-15 03:13:11,671 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date mike@elkhart.com20110613 (route 50.21.208.0/20 block=3223)
+# 2024-10-15 03:13:15,420 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date 20113511 (route 66.211.112.0/20 block=4310)
+# 2024-10-15 03:13:27,025 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 10001/13000/45835 blocks (21.88 seconds) 36.9% done, ignored 326 duplicates
+# 2024-10-15 03:13:27,055 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 10001/12189/45876 blocks (21.92 seconds) 36.9% done, ignored 320 duplicates
+# 2024-10-15 03:13:28,359 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 10001/12922/48143 blocks (23.22 seconds) 38.7% done, ignored 325 duplicates
+# 2024-10-15 03:13:34,817 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date 20113511 (route 173.241.64.0/20 block=13852)
+# 2024-10-15 03:13:35,526 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date ispadmin@tdstelecom.com (route 184.61.135.0/24 block=14597)
+# 2024-10-15 03:13:35,909 - create_db - DEBUG    - Process-3   17 - arin.db.gz - committed 10001/12801/62290 blocks (30.77 seconds) 50.1% done, ignored 356 duplicates
+# 2024-10-15 03:13:51,191 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 20001/24901/89043 blocks (24.13 seconds) 71.6% done, ignored 1676 duplicates
+# 2024-10-15 03:13:51,756 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 20001/25758/90240 blocks (24.73 seconds) 72.6% done, ignored 1705 duplicates
+# 2024-10-15 03:14:02,205 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 20001/28072/107901 blocks (33.85 seconds) 86.8% done, ignored 2900 duplicates
+# 2024-10-15 03:14:02,212 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 20001/28074/107915 blocks (0.01 seconds) 86.8% done, ignored 2901 duplicates
+# 2024-10-15 03:14:03,042 - create_db - DEBUG    - Process-3   17 - arin.db.gz - ignoring invalid changed date 2011021700 (route 2604:CC00::/32 block=15597)
+# 2024-10-15 03:14:07,812 - create_db - DEBUG    - Process-3   17 - arin.db.gz - ignoring invalid changed date noc@craigslist.org (route 2620:7e::/44 block=17526)
+# 2024-10-15 03:14:08,451 - create_db - DEBUG    - Process-4   18 - arin.db.gz - Process-4 finished: 32579 blocks total
+# 2024-10-15 03:14:08,451 - create_db - DEBUG    - Process-2   16 - arin.db.gz - Process-2 finished: 31548 blocks total
+# 2024-10-15 03:14:08,452 - create_db - DEBUG    - Process-1   15 - arin.db.gz - Process-1 finished: 33173 blocks total
+# 2024-10-15 03:14:08,467 - create_db - DEBUG    - Process-3   17 - arin.db.gz - Process-3 finished: 27020 blocks total
+# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - arin.db.gz - block parsing finished: 63.85 seconds
+# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - lacnic.db.gz - File ./downloads/lacnic.db.gz not found. Please download using download_dumps.sh
+# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - ripe.db.inetnum.gz - File ./downloads/ripe.db.inetnum.gz not found. Please download using download_dumps.sh
+# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - apnic.db.inet6num.gz - File ./downloads/apnic.db.inet6num.gz not found. Please download using download_dumps.sh
+# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - ripe.db.inet6num.gz - File ./downloads/ripe.db.inet6num.gz not found. Please download using download_dumps.sh
+# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - empty - script finished: 65.77 seconds
