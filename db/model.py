@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*- ®
 
-from sqlalchemy import Column, Integer, String, DateTime, Index, PrimaryKeyConstraint
+# TODO: handle race conditions https://rachbelaid.com/handling-race-condition-insert-with-sqlalchemy/
+
+from sqlalchemy import Unicode, Column, Integer, String, DateTime, Index, PrimaryKeyConstraint
 from sqlalchemy import literal_column
 from db.helper import get_base
 from sqlalchemy.dialects import postgresql
@@ -16,7 +18,8 @@ class BlockCidr(Base):
   __tablename__ = 'cidr'
   # id = Column(Integer, primary_key=True)
   # inetnum = Column(postgresql.CIDR, nullable=False, index=True)
-  inetnum = Column(postgresql.CIDR, primary_key=True)
+  # inetnum = Column(postgresql.CIDR, primary_key=True)
+  inetnum = Column(postgresql.CIDR, unique=True, nullable=False, index=True)
   attr =  Column(String, nullable=False, index=True)
   netname = Column(String, nullable=True, index=True)
   autnum = Column(String, index=True)
@@ -43,7 +46,8 @@ class BlockCidr(Base):
 class BlockMember(Base):
   __tablename__ = 'member'
   # id = Column(Integer, primary_key=True)
-  id = Column(String, primary_key=True)
+  # id = Column(String, primary_key=True)
+  idd = Column(String, unique=True)
   attr =  Column(String, nullable=False, index=True)
   name = Column(String, nullable=False, index=True)
   description = Column(String)
@@ -59,11 +63,11 @@ class BlockMember(Base):
   def __repr__(self):
     return self.__str__()
 
-# BlockObject: aut-num, as-set, route-set, domain
+# BlockAttr: aut-num, as-set, route-set, domain
 # name=name, attr=attr, description=description, remarks=remarks
-class BlockObject(Base):
+class BlockAttr(Base):
   __tablename__ = 'attr'
-  id = Column(Integer, primary_key=True)
+  # id = Column(Integer, primary_key=True)
   name = Column(String, nullable=False, index=True)
   attr =  Column(String, nullable=False, index=True)
   description = Column(String)

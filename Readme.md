@@ -135,54 +135,53 @@ whoami=uid=1000(app) gid=1000(app) groups=1000(app)
 SKIP: arin.db.gz
 SKIP: afrinic.db.gz
 /app/create_db.py -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug
-2024-10-15 03:13:02,970 - create_db - INFO     - MainProcess 14 - afrinic.db.gz - File ./downloads/afrinic.db.gz not found. Please download using download_dumps.sh
-2024-10-15 03:13:02,971 - create_db - INFO     - MainProcess 14 - apnic.db.inetnum.gz - File ./downloads/apnic.db.inetnum.gz not found. Please download using download_dumps.sh
-2024-10-15 03:13:02,971 - create_db - INFO     - MainProcess 14 - arin.db.gz - parsing database file: ./downloads/arin.db.gz
-2024-10-15 03:13:03,332 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (10000 so far, ignored 0 blocks)
-2024-10-15 03:13:03,421 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (20000 so far, ignored 0 blocks)
-2024-10-15 03:13:03,525 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (30000 so far, ignored 0 blocks)
-2024-10-15 03:13:03,618 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (40000 so far, ignored 0 blocks)
-2024-10-15 03:13:03,719 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (50000 so far, ignored 0 blocks)
-2024-10-15 03:13:03,818 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (60000 so far, ignored 0 blocks)
-2024-10-15 03:13:03,911 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (70000 so far, ignored 0 blocks)
-2024-10-15 03:13:04,048 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (80000 so far, ignored 0 blocks)
-2024-10-15 03:13:04,152 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (90000 so far, ignored 0 blocks)
-2024-10-15 03:13:04,248 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (100000 so far, ignored 0 blocks)
-2024-10-15 03:13:04,342 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (110000 so far, ignored 0 blocks)
-2024-10-15 03:13:04,449 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (120000 so far, ignored 0 blocks)
-2024-10-15 03:13:04,622 - create_db - INFO     - MainProcess 14 - arin.db.gz - Total 124320 blocks: Parsed 124320 blocks, ignored 0 blocks
-2024-10-15 03:13:04,623 - create_db - INFO     - MainProcess 14 - arin.db.gz - file parsing finished: 1.65 seconds
-2024-10-15 03:13:04,623 - create_db - INFO     - MainProcess 14 - arin.db.gz - parsing blocks
-2024-10-15 03:13:04,648 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - starting 4 processes
-2024-10-15 03:13:04,858 - create_db - INFO     - MainProcess 14 - arin.db.gz - blocks load into workers finished: 0.24 seconds
-2024-10-15 03:13:05,135 - create_db - DEBUG    - Process-3   17 - arin.db.gz - committed 1/2089/8116 blocks (0.47 seconds) 6.5% done, ignored 0 duplicates
-2024-10-15 03:13:05,135 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 1/1549/8116 blocks (0.47 seconds) 6.5% done, ignored 0 duplicates
-2024-10-15 03:13:05,138 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 1/2272/8119 blocks (0.48 seconds) 6.5% done, ignored 0 duplicates
-2024-10-15 03:13:05,144 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 1/2348/8132 blocks (0.49 seconds) 6.5% done, ignored 0 duplicates
-2024-10-15 03:13:11,671 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date mike@elkhart.com20110613 (route 50.21.208.0/20 block=3223)
-2024-10-15 03:13:15,420 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date 20113511 (route 66.211.112.0/20 block=4310)
-2024-10-15 03:13:27,025 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 10001/13000/45835 blocks (21.88 seconds) 36.9% done, ignored 326 duplicates
-2024-10-15 03:13:27,055 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 10001/12189/45876 blocks (21.92 seconds) 36.9% done, ignored 320 duplicates
-2024-10-15 03:13:28,359 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 10001/12922/48143 blocks (23.22 seconds) 38.7% done, ignored 325 duplicates
-2024-10-15 03:13:34,817 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date 20113511 (route 173.241.64.0/20 block=13852)
-2024-10-15 03:13:35,526 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date ispadmin@tdstelecom.com (route 184.61.135.0/24 block=14597)
-2024-10-15 03:13:35,909 - create_db - DEBUG    - Process-3   17 - arin.db.gz - committed 10001/12801/62290 blocks (30.77 seconds) 50.1% done, ignored 356 duplicates
-2024-10-15 03:13:51,191 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 20001/24901/89043 blocks (24.13 seconds) 71.6% done, ignored 1676 duplicates
-2024-10-15 03:13:51,756 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 20001/25758/90240 blocks (24.73 seconds) 72.6% done, ignored 1705 duplicates
-2024-10-15 03:14:02,205 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 20001/28072/107901 blocks (33.85 seconds) 86.8% done, ignored 2900 duplicates
-2024-10-15 03:14:02,212 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 20001/28074/107915 blocks (0.01 seconds) 86.8% done, ignored 2901 duplicates
-2024-10-15 03:14:03,042 - create_db - DEBUG    - Process-3   17 - arin.db.gz - ignoring invalid changed date 2011021700 (route 2604:CC00::/32 block=15597)
-2024-10-15 03:14:07,812 - create_db - DEBUG    - Process-3   17 - arin.db.gz - ignoring invalid changed date noc@craigslist.org (route 2620:7e::/44 block=17526)
-2024-10-15 03:14:08,451 - create_db - DEBUG    - Process-4   18 - arin.db.gz - Process-4 finished: 32579 blocks total
-2024-10-15 03:14:08,451 - create_db - DEBUG    - Process-2   16 - arin.db.gz - Process-2 finished: 31548 blocks total
-2024-10-15 03:14:08,452 - create_db - DEBUG    - Process-1   15 - arin.db.gz - Process-1 finished: 33173 blocks total
-2024-10-15 03:14:08,467 - create_db - DEBUG    - Process-3   17 - arin.db.gz - Process-3 finished: 27020 blocks total
-2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - arin.db.gz - block parsing finished: 63.85 seconds
-2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - lacnic.db.gz - File ./downloads/lacnic.db.gz not found. Please download using download_dumps.sh
-2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - ripe.db.inetnum.gz - File ./downloads/ripe.db.inetnum.gz not found. Please download using download_dumps.sh
-2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - apnic.db.inet6num.gz - File ./downloads/apnic.db.inet6num.gz not found. Please download using download_dumps.sh
-2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - ripe.db.inet6num.gz - File ./downloads/ripe.db.inet6num.gz not found. Please download using download_dumps.sh
-2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - empty - script finished: 65.77 seconds
+2024-10-15 19:44:37,509 - create_db - INFO     - MainProcess 13 - afrinic.db.gz - File ./downloads/afrinic.db.gz not found. Please download using download_dumps.sh
+2024-10-15 19:44:37,510 - create_db - INFO     - MainProcess 13 - apnic.db.inetnum.gz - File ./downloads/apnic.db.inetnum.gz not found. Please download using download_dumps.sh
+2024-10-15 19:44:37,510 - create_db - INFO     - MainProcess 13 - arin.db.gz - loading database file: ./downloads/arin.db.gz
+2024-10-15 19:44:37,870 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (10000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:37,961 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (20000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,065 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (30000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,158 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (40000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,259 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (50000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,357 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (60000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,449 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (70000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,548 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (80000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,652 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (90000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,747 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (100000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,840 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (110000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:38,947 - create_db - DEBUG    - MainProcess 13 - arin.db.gz - read_blocks: another 10000 blocks so far, Kept (120000 blocks, Ignored 0 blocks,
+2024-10-15 19:44:39,120 - create_db - INFO     - MainProcess 13 - arin.db.gz - read_blocks: Kept 124320 blocks + Ignored 0 blocks = Total 124320 blocks
+2024-10-15 19:44:39,120 - create_db - INFO     - MainProcess 13 - arin.db.gz - file loading finished: 1.61 seconds (77217 blocks/s)
+2024-10-15 19:44:39,144 - create_db - INFO     - MainProcess 13 - arin.db.gz - BLOCKS PARSING START: starting 4 processes for 124320 blocks (~31080 per worker)
+2024-10-15 19:44:39,347 - create_db - INFO     - MainProcess 13 - arin.db.gz - blocks load into workers finished: 0.23 seconds
+2024-10-15 19:44:45,895 - create_db - DEBUG    - Process-3   16 - arin.db.gz - ignoring invalid changed date mike@elkhart.com20110613 (route 50.21.208.0/20 block=5092)
+2024-10-15 19:44:49,451 - create_db - DEBUG    - Process-4   17 - arin.db.gz - ignoring invalid changed date 20113511 (route 66.211.112.0/20 block=6350)
+2024-10-15 19:44:54,729 - create_db - DEBUG    - Process-3   16 - arin.db.gz - committed 7385/10000/36113 blocks (15.57 seconds) 29.0% done, ignored 271/1038 duplicates/total (474 inserts/s)
+2024-10-15 19:44:56,029 - create_db - DEBUG    - Process-1   14 - arin.db.gz - committed 7572/10000/38713 blocks (16.87 seconds) 31.1% done, ignored 269/1057 duplicates/total (449 inserts/s)
+2024-10-15 19:44:56,992 - create_db - DEBUG    - Process-2   15 - arin.db.gz - committed 7922/10000/40450 blocks (17.83 seconds) 32.5% done, ignored 280/1092 duplicates/total (444 inserts/s)
+2024-10-15 19:44:57,678 - create_db - DEBUG    - Process-4   17 - arin.db.gz - committed 7783/10000/41554 blocks (18.51 seconds) 33.4% done, ignored 264/1132 duplicates/total (420 inserts/s)
+2024-10-15 19:45:08,240 - create_db - DEBUG    - Process-3   16 - arin.db.gz - ignoring invalid changed date 20113511 (route 173.241.64.0/20 block=15924)
+2024-10-15 19:45:08,999 - create_db - DEBUG    - Process-1   14 - arin.db.gz - ignoring invalid changed date ispadmin@tdstelecom.com (route 184.61.135.0/24 block=16958)
+2024-10-15 19:45:17,356 - create_db - DEBUG    - Process-1   14 - arin.db.gz - committed 16387/20000/76817 blocks (21.33 seconds) 61.8% done, ignored 1454/5821 duplicates/total (429 inserts/s)
+2024-10-15 19:45:18,665 - create_db - DEBUG    - Process-3   16 - arin.db.gz - committed 16182/20000/78778 blocks (23.94 seconds) 63.4% done, ignored 1474/5870 duplicates/total (410 inserts/s)
+2024-10-15 19:45:19,969 - create_db - DEBUG    - Process-4   17 - arin.db.gz - committed 16592/20000/81003 blocks (22.29 seconds) 65.2% done, ignored 1455/5934 duplicates/total (407 inserts/s)
+2024-10-15 19:45:19,989 - create_db - DEBUG    - Process-2   15 - arin.db.gz - committed 16684/20000/81047 blocks (23.0 seconds) 65.2% done, ignored 1518/5938 duplicates/total (409 inserts/s)
+2024-10-15 19:45:40,425 - create_db - DEBUG    - Process-1   14 - arin.db.gz - ignoring invalid changed date 2011021700 (route 2604:CC00::/32 block=28461)
+2024-10-15 19:45:41,889 - create_db - DEBUG    - Process-3   16 - arin.db.gz - committed 24753/30000/115993 blocks (23.22 seconds) 93.3% done, ignored 2903/11677 duplicates/total (395 inserts/s)
+2024-10-15 19:45:44,889 - create_db - DEBUG    - Process-2   15 - arin.db.gz - ignoring invalid changed date noc@craigslist.org (route 2620:7e::/44 block=29733)
+2024-10-15 19:45:45,110 - create_db - DEBUG    - Process-4   17 - arin.db.gz - committed 24845/30000/121402 blocks (25.14 seconds) 97.7% done, ignored 3202/12886 duplicates/total (377 inserts/s)
+2024-10-15 19:45:45,195 - create_db - DEBUG    - Process-1   14 - arin.db.gz - committed 24643/30000/121631 blocks (27.84 seconds) 97.8% done, ignored 3198/12890 duplicates/total (373 inserts/s)
+2024-10-15 19:45:45,214 - create_db - DEBUG    - Process-2   15 - arin.db.gz - committed 24911/30000/121700 blocks (25.22 seconds) 97.9% done, ignored 3291/12891 duplicates/total (377 inserts/s)
+2024-10-15 19:45:45,398 - create_db - DEBUG    - Process-3   16 - arin.db.gz - Process-3 finished: 32345 blocks total (66 seconds) (488 blocks/s)
+2024-10-15 19:45:45,398 - create_db - DEBUG    - Process-1   14 - arin.db.gz - Process-1 finished: 30663 blocks total (66 seconds) (463 blocks/s)
+2024-10-15 19:45:45,399 - create_db - DEBUG    - Process-4   17 - arin.db.gz - Process-4 finished: 30597 blocks total (66 seconds) (462 blocks/s)
+2024-10-15 19:45:45,411 - create_db - DEBUG    - Process-2   15 - arin.db.gz - Process-2 finished: 30715 blocks total (66 seconds) (464 blocks/s)
+2024-10-15 19:45:45,421 - create_db - INFO     - MainProcess 13 - arin.db.gz - BLOCKS PARSING DONE: 68 seconds (1831 blocks/s) for 124320 blocks
+2024-10-15 19:45:45,421 - create_db - INFO     - MainProcess 13 - lacnic.db.gz - File ./downloads/lacnic.db.gz not found. Please download using download_dumps.sh
+2024-10-15 19:45:45,421 - create_db - INFO     - MainProcess 13 - ripe.db.inetnum.gz - File ./downloads/ripe.db.inetnum.gz not found. Please download using download_dumps.sh
+2024-10-15 19:45:45,421 - create_db - INFO     - MainProcess 13 - apnic.db.inet6num.gz - File ./downloads/apnic.db.inet6num.gz not found. Please download using download_dumps.sh
+2024-10-15 19:45:45,421 - create_db - INFO     - MainProcess 13 - ripe.db.inet6num.gz - File ./downloads/ripe.db.inet6num.gz not found. Please download using download_dumps.sh
+2024-10-15 19:45:45,421 - create_db - INFO     - MainProcess 13 - empty - script finished: 68.16 seconds
 
 $ ./bin/query 8.8.8.8
 SELECT block.inetnum, block.netname, block.country, block.description, block.maintained_by, block.created, block.last_modified, block.source FROM block WHERE block.inetnum >> '8.8.8.8' ORDER BY block.inetnum DESC;
@@ -240,8 +239,9 @@ TODO:
 - [ ] replace all binstubs commands with demonized compose
 - [ ] Start charging for my hard work?
 
-## version: 2.0.10
+## version: 2.0.11
 
+- 2.0.11  parent table multicolumn primary keys: trying to Handle concurrent INSERT with SQLAlchemy: it works but... technique from rachbelaid.com is 2015 old and other errors arise (except IntegrityError bleed into Exception + RecursionError: maximum recursion depth exceeded)
 - 2.0.10  better logging
 - 2.0.9   multiple bugfixes
 - 2.0.8   now increment shared counters

@@ -41,12 +41,9 @@ import logging
 import re
 import os
 
-from db.model import BlockCidr
-from db.model import BlockMember
-from db.model import BlockObject
-from db.model import BlockParent
+from db.model import BlockCidr, BlockMember, BlockAttr, BlockParent
 from db.helper import setup_connection
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
 VERSION = '2.1'
@@ -302,6 +299,14 @@ def partition(pred, iterable):
   return trues, falses
 
 
+# getRow(BlockParent, "4.36.104.120/29")
+# getRow(BlockParent, "ARIN", ""4.36.104.120/29")
+def getRow(session, base, child):
+# def getRow(session, base, parent, child):
+  return session.query(BlockParent).filter(BlockParent.child == child).first()
+  # return session.query(base).filter(and_(base.parent == parent, base.child == child)).first()
+
+
 def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, blocks_skipped_total):
   session = setup_connection(connection_string)
 
@@ -331,7 +336,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     organisation  = parse_property(block, b'organisation')
     irt           = parse_property(block, b'irt')
     
-    # BlockObject: aut-num, as-set, route-set, domain
+    # BlockAttr: aut-num, as-set, route-set, domain
     autnum        = parse_property(block, b'aut-num')
     asset         = parse_property(block, b'as-set')
     routeset      = parse_property(block, b'route-set')
@@ -463,7 +468,6 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
       # https://stackoverflow.com/questions/32461785/sqlalchemy-check-before-insert-in-python
       # logger.debug('----------------------------------------------------- for cidr in inetnum: %s --- % attr')
       for cidr in inetnum:
-        # session.flush()   # seems redundant
         try:
           # logger.debug('counter1: %d %s' % (inserts, cidr.decode('utf-8')))
           b = BlockCidr(inetnum=cidr.decode('utf-8'), attr=attr, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
@@ -476,53 +480,81 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
           # inserts += 1
           # logger.debug('counter5: %d' % inserts)
-        except SQLAlchemyError as e:
+        # except SQLAlchemyError as e:
+        except IntegrityError as e:
+          logger.debug('%s: block %d VALUES (cidr="%s","%s",netname="%s",..)' % (e.__class__.__name__,inserts,cidr.decode('utf-8'),attr,netname))
           duplicates +=1
           blocks_skipped_total.increment()
           session.rollback()
           # logger.debug('counter6: %d: %s' % (inserts, type(e))) #  <class 'sqlalchemy.exc.IntegrityError'>
+          # logger.debug('counter6: %d: %s' % (inserts, type(e))) #  <class 'sqlalchemy.exc.PendingRollbackError'>
         except Exception as e:
-          logger.debug('     -1 : %d: %s' % (inserts, e.__class__.__name__))
-    
-      # # logger.debug('----------------------------------------------------- for parent in parents: %s --- % attr')
-      # # inverse keys:
-      # for parent_type, parents in [mntby, memberof, org, mntlowers, mntroutes, mntdomains, mntnfy, mntirt, adminc, techc, abusec, notifys]:
-        # for parent in parents:
-          # session.flush()
-          # try:
-            # # logger.debug('parents: %d VALUES ("%s","%s","%s","%s")' % (inserts,parent,parent_type,netname,attr))
-            # b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=attr)
-            # session.add(b)
-            # session.flush()
-            # inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
-            # # inserts += 1
-          # except SQLAlchemyError as e:
-            # duplicates +=1
-            # blocks_skipped_total.increment()
-            # session.rollback()
-          # except Exception as e:
-            # logger.debug('     -1 : %d: %s' % (inserts, e.__class__.__name__))
+          session.rollback()
+          logger.debug('%s: block %d VALUES (cidr="%s","%s",netname="%s",..)' % (e.__class__.__name__,inserts,cidr.decode('utf-8'),attr,netname))
+        else:
+          session.flush()
       
-      # # logger.debug('----------------------------------------------------- for child in children: %s --- % attr')
-      # # local keys:
-      # for child_type, children in [notifys]:
-        # for child in children:
-          # session.flush()
-          # try:
-            # # logger.debug('children: %d VALUES ("%s","%s","%s","%s")' % (inserts,netname,attr,child,child_type))
-            # b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
-            # session.add(b)
-            # session.flush()
-            # inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
-            # # inserts += 1
-          # except SQLAlchemyError as e:
-            # duplicates +=1
-            # blocks_skipped_total.increment()
-            # session.rollback()
-          # except Exception as e:
-            # logger.debug('     -1 : %d: %s' % (inserts, e.__class__.__name__))
-    
-    
+      # Okay.. there are so many of these relationships (order of magnitude 2 or 3 compared to actual inetnums) that we end up with deadlock detected
+      # By 31577 blocks we are up to 17633 dupes and down to 37 inserts/s
+      # By 95382 blocks we are up to 67665 dupes and down to 15 inserts/s
+      
+      # logger.debug('----------------------------------------------------- for parent in parents: %s --- % attr')
+      # inverse keys:
+      # for parent_type, parents in [mntby, memberof, org, mntlowers, mntroutes, mntdomains, mntnfy, mntirt, adminc, techc, abusec, notifys]:
+      for parent_type, parents in [mntby]:
+        for parent in parents:
+          # 1. Looking for an existing Block object for these url value
+          b = getRow(session, BlockParent, netname)
+          if b:
+            # 2. A Block object exist and so we move on
+            continue
+          # 3. A Block object doesn't exist so we create an instance
+          b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=attr)
+          # 4. We create a savepoint in case of race condition 
+          session.begin_nested()
+          try:
+            session.add(b)
+            # 5. We try to insert and release the savepoint
+            session.flush()
+          except IntegrityError as e:
+            # 6. The insert fail due to a concurrent transaction
+            session.rollback()
+            duplicates +=1
+            blocks_skipped_total.increment()
+            # logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), parent,parent_type,netname,attr))
+          except Exception as e:
+            session.rollback()
+            logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), parent,parent_type,netname,attr))
+          else:
+            inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+            # inserts += 1
+          
+        
+      
+      # logger.debug('----------------------------------------------------- for child in children: %s --- % attr')
+      # local keys:
+      for child_type, children in [notifys]:
+        for child in children:
+          try:
+            b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
+            session.add(b)
+            session.flush()
+            inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+            # inserts += 1
+          except IntegrityError as e:
+            # 6. The insert fail due to a concurrent transaction
+            session.rollback()
+            duplicates +=1
+            blocks_skipped_total.increment()
+            # logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), netname,attr,child,child_type))
+          except Exception as e:
+            session.rollback()
+            logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), netname,attr,child,child_type))
+          else:
+            session.flush()
+          
+        
+      
     
     # Attribute Name  Presence   Repeat     Indexed
     # mntner:         mandatory  single     primary/lookup key
@@ -631,22 +663,22 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     
     # if mntner or person or role or organisation or irt:
       # if mntner:
-        # id = name = mntner
+        # idd = name = mntner
         # attr = 'mntner'
       # if person:
-        # id = parse_property(block, b'nic-hdl')
+        # idd = parse_property(block, b'nic-hdl')
         # name = person
         # attr = 'person'
       # if role:
-        # id = parse_property(block, b'nic-hdl')
+        # idd = parse_property(block, b'nic-hdl')
         # name = role
         # attr = 'role'
       # if organisation:
-        # id = organisation
+        # idd = organisation
         # name = parse_property(block, b'org-name')
         # attr = 'organisation'
       # if irt:
-        # id = name = irt
+        # idd = name = irt
         # attr = 'irt'
         
       # description = parse_property(block, b'descr')
@@ -671,7 +703,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
       # refnfys     =   ('e-mail', parse_properties(block, b'ref-nfy'))
       # updtos      =   ('e-mail', parse_properties(block, b'upd-to'))
       
-      # b = BlockCidr(id=id, attr=attr, name=name, description=description, remarks=remarks)
+      # b = BlockCidr(idd=idd, attr=attr, name=name, description=description, remarks=remarks)
       # session.add(b)
       # inserts = updateCounter(inserts)
       
@@ -776,7 +808,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     # last-modified:    generated      single
     # source:           mandatory      single
     
-    # BlockObject: aut-num, as-set, route-set, domain
+    # BlockAttr: aut-num, as-set, route-set, domain
     # autnum = parse_property(block, b'aut-num')
     # asset = parse_property(block, b'as-set')
     # routeset = parse_property(block, b'route-set')
@@ -831,7 +863,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
         # if autnums:
           # autnums_members = ('aut-num', autnums)
       
-      # b = BlockObject(name=name, attr=attr, description=description, remarks=remarks)
+      # b = BlockAttr(name=name, attr=attr, description=description, remarks=remarks)
       # session.add(b)
       # inserts = updateCounter(inserts)
       
