@@ -234,9 +234,10 @@ TODO:
 - [ ] increase efficiency
 - [ ] Start charging for my hard work?
 
-## version: 2.0.15
+## version: 2.0.16
 
-- 2.0.15  215 inserts/s
+- 2.0.16  300 inserts/s: 1 commit/block, autoflush
+- 2.0.15  215 inserts/s: 1 commit/insert, autoflush
 - 2.0.14  added --reset_db and --commit_count 100
 - 2.0.13  now getRow before insert. ALSO works much better when commit instead of flush: parallel process don't use same blocks anymore
 - 2.0.12  added autoflush=True

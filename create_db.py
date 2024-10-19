@@ -48,7 +48,7 @@ from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.0.15'
+VERSION = '2.0.16'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
 # LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
@@ -524,8 +524,8 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           session.add(b)
           # logger.debug('counter3: %d' % inserts)
           # 5. We try to insert and release the savepoint
-          # session.flush()
-          session.commit()
+          session.flush()
+          # session.commit()
           # logger.debug('counter4: %d' % inserts)
         except (IntegrityError) as e:
           # 6. The insert fail due to a concurrent transaction/actual dupe
@@ -566,8 +566,8 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
-            # session.flush()
-            session.commit()
+            session.flush()
+            # session.commit()
           except (IntegrityError) as e:
             # 6. The insert fail due to a concurrent transaction/actual dupe
             session.rollback()
@@ -599,8 +599,8 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
-            # session.flush()
-            session.commit()
+            session.flush()
+            # session.commit()
           except (IntegrityError) as e:
             # 6. The insert fail due to a concurrent transaction/actual dupe
             session.rollback()
@@ -966,6 +966,13 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     # https://docs.python.org/2/library/multiprocessing.html#multiprocessing.sharedctypes.Value
     # blocks_processed_total.value() += 1
     blocks_processed_total.increment()
+    
+    try:
+      session.commit()
+    except Exception as e:
+      session.rollback()
+      print(f"{TIME2COMMIT} blocks_processed {blocks_processed} blocks_processed_total {blocks_processed_total.value()} !{e.__class__.__name__}!")
+    
     
     # We do many more loops for each block because of the parent table, also we decrement it sometimes, and will inevitably pass the mark. cannot use counter inserts here:
     # if inserts % COMMIT_COUNT == 0:
@@ -1613,8 +1620,13 @@ if __name__ == '__main__':
 # source:         AFRINIC
 
 
-# v2.0.15
+# v2.0.15 215 inserts/s: 1 commit/insert, autoflush
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-4   18 - arin.db.gz - committed 35567/10000/39866 inserts/blocks/total (165.55 seconds) 32.1% done, ignored 339/9509 dupes/total (215 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-2   16 - arin.db.gz - committed 35826/10000/39911 inserts/blocks/total (165.7 seconds) 32.1% done, ignored 261/9509 dupes/total (216 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-1   15 - arin.db.gz - committed 35380/10000/39950 inserts/blocks/total (165.89 seconds) 32.1% done, ignored 371/9509 dupes/total (213 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-3   17 - arin.db.gz - committed 35825/10000/40261 inserts/blocks/total (167.43 seconds) 32.4% done, ignored 284/9510 dupes/total (214 inserts/s)
+# v2.0.16 300 inserts/s: 1 commit/block, autoflush
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-1   17 - arin.db.gz - committed 35520/10000/39651 inserts/blocks/total (114.42 seconds) 31.9% done, ignored 553/10549 dupes/total (310 inserts/s)
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-2   18 - arin.db.gz - committed 35714/10000/40075 inserts/blocks/total (115.78 seconds) 32.2% done, ignored 614/10555 dupes/total (308 inserts/s)
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-4   20 - arin.db.gz - committed 35723/10000/40112 inserts/blocks/total (115.91 seconds) 32.3% done, ignored 583/10555 dupes/total (308 inserts/s)
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-3   19 - arin.db.gz - committed 35682/10000/40131 inserts/blocks/total (115.99 seconds) 32.3% done, ignored 549/10555 dupes/total (308 inserts/s)
