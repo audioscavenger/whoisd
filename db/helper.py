@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*- ®
 
-# TODO: handle race conditions https://rachbelaid.com/handling-race-condition-insert-with-sqlalchemy/
-
 from sqlalchemy import create_engine
 # # MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
 # # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declarative_base, scoped_session, sessionmaker, exc
 
-# Base = declarative_base()
+Base = declarative_base()
 
-# from sqlalchemy.ext.declarative import declared_attr, as_declarative    # deprecated
-from sqlalchemy.orm import declared_attr, as_declarative
-from sqlalchemy import Column, Integer
-
-@as_declarative()
-class Base(object):
-  @declared_attr
-  def __tablename__(cls):
-    return cls.__name__.lower()
-  # Note that as of SQLAlchemy 1.1, 'autoincrement=True' must be indicated explicitly for composite (e.g. multicolumn) primary keys if AUTO_INCREMENT/SERIAL/IDENTITY behavior is expected for one of the columns in the primary key.
-  id = Column(Integer, primary_key=True, autoincrement=True)
+# TRY: handle race conditions https://rachbelaid.com/handling-race-condition-insert-with-sqlalchemy/
+# RESULT: actually it only works because you commit instead of flushing... not efficient
+# # from sqlalchemy.ext.declarative import declared_attr, as_declarative    # deprecated
+# from sqlalchemy.orm import declared_attr, as_declarative
+# from sqlalchemy import Column, Integer
+# @as_declarative()
+# class Base(object):
+  # @declared_attr
+  # def __tablename__(cls):
+    # return cls.__name__.lower()
+  # # deprecation warning: Note that as of SQLAlchemy 1.1, 'autoincrement=True' must be indicated explicitly for composite (e.g. multicolumn) primary keys if AUTO_INCREMENT/SERIAL/IDENTITY behavior is expected for one of the columns in the primary key.
+  # id = Column(Integer, primary_key=True, autoincrement=True)
 
 def get_base():
   return Base
@@ -44,7 +43,8 @@ def setup_connection(connection_string, create_db=False, auto_commit=False):
   engine = create_postgres_pool(connection_string)
   # session = sessionmaker()
   # session.configure(bind=engine)
-  session = scoped_session(sessionmaker(bind=engine))
+  # session = scoped_session(sessionmaker(bind=engine))
+  session = scoped_session(sessionmaker(autoflush=True, bind=engine))
   Base.metadata.bind = engine
   
   if create_db:

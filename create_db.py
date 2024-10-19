@@ -43,18 +43,21 @@ import os
 
 from db.model import BlockCidr, BlockMember, BlockAttr, BlockParent
 from db.helper import setup_connection
+# https://docs.sqlalchemy.org/en/20/core/operators.html
+from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.1'
+VERSION = '2.0.14'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
-LOG_FORMAT = '%(asctime)-15s - %(name)-9s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
+# LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
+LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s() ] %(levelname)-8s: %(processName)-11s %(process)d - %(message)s'
 COMMIT_COUNT = 10000
 MODULO = 10000
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
-
+RESET_DB = False
 
 class ContextFilter(logging.Filter):
   def filter(self, record):
@@ -73,7 +76,7 @@ logger.addHandler(stream_handler)
 
 
 # https://eli.thegreenplace.net/2012/01/04/shared-counter-with-pythons-multiprocessing#the-right-way
-class Counter(object):
+class CounterShared(object):
   def __init__(self, initval=0):
     self.val = Value('i', initval)
     self.lock = Lock()
@@ -254,13 +257,12 @@ def read_blocks(filepath: str) -> list:
   return blocks
 
 
-# def updateCounter(counter: int, TIME2COMMIT: bool):
-  # # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
-  # global TIME2COMMIT    # apparently that does not work if TIME2COMMIT is defined within parse_block??
-  # if not TIME2COMMIT:
-    # if counter % COMMIT_COUNT == 0:
-      # TIME2COMMIT = True
-  # return counter + 1
+def updateCounter(counter: int):
+  # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
+  if not TIME2COMMIT:
+    if counter % COMMIT_COUNT == 0:
+      TIME2COMMIT = True
+  return counter + 1
 
 def updateCounterLocal(counter: int, time2commit: bool):
   # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
@@ -299,12 +301,29 @@ def partition(pred, iterable):
   return trues, falses
 
 
-# getRow(BlockParent, "4.36.104.120/29")
-# getRow(BlockParent, "ARIN", ""4.36.104.120/29")
-def getRow(session, base, child):
-# def getRow(session, base, parent, child):
-  return session.query(BlockParent).filter(BlockParent.child == child).first()
-  # return session.query(base).filter(and_(base.parent == parent, base.child == child)).first()
+# getParentRow(BlockParent, "4.36.104.120/29")
+# getParentRow(BlockParent, "ARIN", ""4.36.104.120/29")
+# def getParentRow(session, base, child):
+  # return session.query(BlockParent).filter(BlockParent.child == child).first()
+# https://docs.sqlalchemy.org/en/20/tutorial/data_select.html#using-select-statements
+# https://docs.sqlalchemy.org/en/20/core/operators.html
+def getParentRow(session, base, parent, parent_type, child, child_type):
+  # https://docs.sqlalchemy.org/en/20/tutorial/data_select.html#using-select-statements
+  # stmt = select(base).where(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)
+  # return session.execute(stmt).first()
+  return session.query(base).filter(and_(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)).first()
+
+
+# https://docs.sqlalchemy.org/en/20/tutorial/data_select.html#using-select-statements
+# https://docs.sqlalchemy.org/en/20/core/operators.html
+def getCidrRow(session, base, cidr):
+  stmt = select(base).where(base.inetnum == cidr)
+  # sqlalchemy.exc.InvalidRequestError: This session is in 'prepared' state; no further SQL can be emitted within this transaction.
+  rows = session.execute(stmt).first()
+  logger.debug(f"inetnum {cidr} : rows={rows}")    # ('4.53.100.168/29',)
+  return rows
+  
+  # return session.query(base).filter(base.inetnum == cidr).first()
 
 
 def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, blocks_skipped_total):
@@ -314,13 +333,15 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
   inserts = 0             # inserted rows only
   duplicates = 0          # rollbacked rows
   blocks_processed = 0    # processed rows: bypassed, added, and rollbacked
+  global TIME2COMMIT
   TIME2COMMIT = False
 
-  seconds_total = 0
+  seconds_total = 0.000000001
   start_time = time.time()
   while True:
     block = jobs.get()
     if block is None:
+      logger.debug(f"block is None")
       break
     
     source = parse_property(block, b'cust_source')
@@ -342,11 +363,16 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     routeset      = parse_property(block, b'route-set')
     domain        = parse_property(block, b'domain')
     
-    if not inetnum and not mntner and not person and not role and not organisation and not domain and not irt and not autnum and not asset and not routeset:
-      # invalid entry, do not parse
-      logger.info(f"Could not parse block {block}.")
+    # logger.debug(f"inetnum={inetnum}")
+    if not inetnum:
+      blocks_skipped_total.increment()
       continue
-    
+    # if not inetnum and not mntner and not person and not role and not organisation and not domain and not irt and not autnum and not asset and not routeset:
+      # # invalid entry, do not parse
+      # logger.info(f"Could not parse block {block}.")
+      # blocks_skipped_total.increment()
+      # break
+
     
     # Attribute Name    Presence   Repeat     Indexed
     # inetnum:          mandatory  single     primary/lookup key
@@ -400,17 +426,22 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     # BlockCidr: inetnum, route
     # if inetnum or route:
     if inetnum:
-      # INETNUM netname: is a name given to a range of IP address space. A netname is made up of letters, digits, the underscore character and the hyphen character. The first character of a name must be a letter, and the last character of a name must be a letter or a digit. It is recommended that the same netname be used for any set of assignment ranges used for a common purpose, such as a customer or service.
+      # INETNUM netname: is a name given to a range of IP address space. 
+      # A netname is made up of letters, digits, the underscore character and the hyphen character. 
+      # The first character of a name must be a letter, and the last character of a name must be a letter or a digit. 
+      # It is recommended that the same netname be used for any set of assignment ranges used for a common purpose, such as a customer or service.
       netname = parse_property(block, b'netname')
       if netname:
         attr='inetnum'
       else:
-        # we need to be able to reference routes with aut-num as they have no name
+        # We need to be able to reference routes with aut-num as they have no name.
+        # Therefore, we use route==netname in the parent table as parent for inverse keys
         # netname = route = 1.1.1.0/24
         netname = inetnum[0].decode('utf-8')
         attr='route'
       
-      # ROUTE origin: is AS Number of the Autonomous System that originates the route into the interAS routing system. The corresponding aut-num attr for this Autonomous System may not exist in the RIPE Database.
+      # ROUTE origin: is AS Number of the Autonomous System that originates the route into the interAS routing system. 
+      # The corresponding aut-num attr for this Autonomous System may not exist in the RIPE Database.
       origin = parse_property(block, b'origin')
       
       description = parse_property(block, b'descr')
@@ -468,31 +499,43 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
       # https://stackoverflow.com/questions/32461785/sqlalchemy-check-before-insert-in-python
       # logger.debug('----------------------------------------------------- for cidr in inetnum: %s --- % attr')
       for cidr in inetnum:
+        # logger.debug(f"inetnum={cidr.decode('utf-8')}, attr={attr}, netname={netname}, autnum={origin}")
+        
+        # 1. Looking for an existing Block object for these url value
+        b = getCidrRow(session, BlockCidr, cidr.decode('utf-8'))
+        if b:
+          # 2. A Block object exist and so we move on
+          continue
+        # 3. A Block object doesn't exist so we create an instance
+        b = BlockCidr(inetnum=cidr.decode('utf-8'), attr=attr, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
+        # 4. We create a savepoint in case of race condition 
+        session.begin_nested()
         try:
-          # logger.debug('counter1: %d %s' % (inserts, cidr.decode('utf-8')))
-          b = BlockCidr(inetnum=cidr.decode('utf-8'), attr=attr, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
           # logger.debug('counter2: %d' % inserts)
+          logger.debug('%d/%d inserts/blocks ADD   VALUES (cidr="%s","%s",netname="%s",..)' % (inserts,blocks_processed_total.value(),cidr.decode('utf-8'),attr,netname))
           session.add(b)
           # logger.debug('counter3: %d' % inserts)
-          session.flush()
+          # 5. We try to insert and release the savepoint
+          # session.flush()
+          session.commit()
           # logger.debug('counter4: %d' % inserts)
-          # inserts = updateCounter(inserts)
-          inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
-          # inserts += 1
-          # logger.debug('counter5: %d' % inserts)
-        # except SQLAlchemyError as e:
-        except IntegrityError as e:
-          logger.debug('%s: block %d VALUES (cidr="%s","%s",netname="%s",..)' % (e.__class__.__name__,inserts,cidr.decode('utf-8'),attr,netname))
+        except (IntegrityError) as e:
+          # 6. The insert fail due to a concurrent transaction/actual dupe
+          session.rollback()
           duplicates +=1
           blocks_skipped_total.increment()
-          session.rollback()
+          logger.debug('%s: %d/%d inserts/blocks  ERROR VALUES (cidr="%s","%s",netname="%s",..)' % (e.__class__.__name__,inserts,blocks_processed_total.value(),cidr.decode('utf-8'),attr,netname))
           # logger.debug('counter6: %d: %s' % (inserts, type(e))) #  <class 'sqlalchemy.exc.IntegrityError'>
           # logger.debug('counter6: %d: %s' % (inserts, type(e))) #  <class 'sqlalchemy.exc.PendingRollbackError'>
         except Exception as e:
           session.rollback()
-          logger.debug('%s: block %d VALUES (cidr="%s","%s",netname="%s",..)' % (e.__class__.__name__,inserts,cidr.decode('utf-8'),attr,netname))
+          logger.debug('%s: %d/%d inserts/blocks  ERROR VALUES (cidr="%s","%s",netname="%s",..)' % (e.__class__.__name__,inserts,blocks_processed_total.value(),cidr.decode('utf-8'),attr,netname))
+          logger.error(e)
+          pass
         else:
-          session.flush()
+          # inserts = updateCounter(inserts)
+          inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+          # inserts += 1
       
       # Okay.. there are so many of these relationships (order of magnitude 2 or 3 compared to actual inetnums) that we end up with deadlock detected
       # By 31577 blocks we are up to 17633 dupes and down to 37 inserts/s
@@ -504,7 +547,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
       for parent_type, parents in [mntby]:
         for parent in parents:
           # 1. Looking for an existing Block object for these url value
-          b = getRow(session, BlockParent, netname)
+          b = getParentRow(session, BlockParent, parent, parent_type, netname, attr)
           if b:
             # 2. A Block object exist and so we move on
             continue
@@ -515,17 +558,18 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
-            session.flush()
-          except IntegrityError as e:
-            # 6. The insert fail due to a concurrent transaction
+            # session.flush()
+            session.commit()
+          except (IntegrityError) as e:
+            # 6. The insert fail due to a concurrent transaction/actual dupe
             session.rollback()
-            duplicates +=1
-            blocks_skipped_total.increment()
             # logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), parent,parent_type,netname,attr))
           except Exception as e:
             session.rollback()
             logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), parent,parent_type,netname,attr))
+            pass
           else:
+            # inserts = updateCounter(inserts)
             inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
             # inserts += 1
           
@@ -535,23 +579,32 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
       # local keys:
       for child_type, children in [notifys]:
         for child in children:
+          # 1. Looking for an existing Block object for these url value
+          b = getParentRow(session, BlockParent, netname, attr, child, child_type)
+          if b:
+            # 2. A Block object exist and so we move on
+            continue
+          # 3. A Block object doesn't exist so we create an instance
+          b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
+          # 4. We create a savepoint in case of race condition 
+          session.begin_nested()
           try:
-            b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
             session.add(b)
-            session.flush()
-            inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
-            # inserts += 1
-          except IntegrityError as e:
-            # 6. The insert fail due to a concurrent transaction
+            # 5. We try to insert and release the savepoint
+            # session.flush()
+            session.commit()
+          except (IntegrityError) as e:
+            # 6. The insert fail due to a concurrent transaction/actual dupe
             session.rollback()
-            duplicates +=1
-            blocks_skipped_total.increment()
-            # logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), netname,attr,child,child_type))
+            # logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), parent,parent_type,netname,attr))
           except Exception as e:
             session.rollback()
-            logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), netname,attr,child,child_type))
+            logger.debug('%s: BlockParent %d dupes: %d/%d VALUES ("%s","%s","%s","%s")' % (e.__class__.__name__,inserts, duplicates,blocks_skipped_total.value(), parent,parent_type,netname,attr))
+            pass
           else:
-            session.flush()
+            # inserts = updateCounter(inserts)
+            inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
+            # inserts += 1
           
         
       
@@ -893,6 +946,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     
     
     blocks_processed += 1
+    logger.debug(f"{TIME2COMMIT} blocks_processed {blocks_processed} blocks_processed_total {blocks_processed_total.value()}")
     # wrong:    https://docs.python.org/3/library/multiprocessing.html#multiprocessing.Value
     # blocks_processed_total.value() += 1
     # wrong:    https://stackoverflow.com/questions/2080660/how-to-increment-a-shared-counter-from-multiple-processes
@@ -907,45 +961,48 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     
     # We do many more loops for each block because of the parent table, also we decrement it sometimes, and will inevitably pass the mark. cannot use counter inserts here:
     # if inserts % COMMIT_COUNT == 0:
-    # Using a function to increment inserts, that updates a global variable TIME2COMMIT works better when there are more INSERTs then blocks
-    if TIME2COMMIT:
-      TIME2COMMIT = False
     # Using a separate counter: inserts for actually added rows makes sense when updating the database, but less sense when building it. Lots of work for little results.
-    # if blocks_processed % COMMIT_COUNT == 0:
+    if blocks_processed % COMMIT_COUNT == 0:
+    # Using a function to increment inserts, that updates a global variable TIME2COMMIT works better when there are more INSERTs then blocks
+    # if TIME2COMMIT:
+      # time.sleep(1)
+      TIME2COMMIT = False
       try:
         # session.flush()
         session.commit()
-      except SQLAlchemyError as e:
-        print('TIME2COMMIT SQLAlchemyError', type(e), e)
       except Exception as e:
-        print('TIME2COMMIT Exception', type(e), e)
-      # session.flush()
-      # session.close()
-      # session = setup_connection(connection_string)
-      
-      # each work will perform roughly the same number of blocks, but this number will never be the same
-      # therefore blocks_processed * NUM_WORKERS will NEVER be == NUM_BLOCKS
-      # percent = (blocks_processed * NUM_WORKERS * 100) / NUM_BLOCKS
-      percent = (blocks_processed_total.value() * 100) / NUM_BLOCKS
-      if percent >= 100:
-        percent = 100
-      seconds = round(time.time() - start_time, 2)
-      seconds_total += seconds
-      logger.debug('committed {}/{}/{} blocks ({} seconds) {:.1f}% done, ignored {}/{} duplicates/total ({} inserts/s)'.format(inserts, blocks_processed, blocks_processed_total.value(), seconds, percent, duplicates, blocks_skipped_total.value(), round(inserts / seconds_total)))
-      start_time = time.time()
+        session.rollback()
+        print('TIME2COMMIT', e.__class__.__name__, type(e), e)
+      else:
+        # session.close()
+        # session = setup_connection(connection_string)
+        
+        # each work will perform roughly the same number of blocks, but this number will never be the same
+        # therefore blocks_processed * NUM_WORKERS will NEVER be == NUM_BLOCKS
+        # percent = (blocks_processed * NUM_WORKERS * 100) / NUM_BLOCKS
+        percent = (blocks_processed_total.value() * 100) / NUM_BLOCKS
+        if percent >= 100:
+          percent = 100
+        seconds = round(time.time() - start_time, 2)
+        seconds_total += seconds
+        # hey remember: we only increment block inserts, not the parent table... so yeah we are down ~150 block inserts/s/worker but overall it's still 400/s
+        logger.info('committed {}/{}/{} inserts/blocks/total ({} seconds) {:.1f}% done, ignored {}/{} dupes/total ({} inserts/s)'.format(inserts, blocks_processed, blocks_processed_total.value(), seconds, percent, duplicates, blocks_skipped_total.value(), round(inserts / seconds_total)))
+        start_time = time.time()
+      # /commit
     # /block
   # /while true
   
   session.commit()
   seconds_total += round(time.time() - start_time, 2)
-  logger.debug(f'{current_process().name} finished: {blocks_processed} blocks total ({round(seconds_total)} seconds) ({round(blocks_processed / seconds_total)} blocks/s)')
+  logger.debug(f"{current_process().name} finished: {blocks_processed} blocks total ({round(seconds_total)} seconds) ({round(blocks_processed / seconds_total)} blocks/s)")
   session.close()
 
 
 def main(connection_string):
   overall_start_time = time.time()
   # reset database
-  setup_connection(connection_string, create_db=True)
+  if RESET_DB:
+    setup_connection(connection_string, create_db=True)
 
   for entry in FILELIST:
     global CURRENT_FILENAME
@@ -965,8 +1022,8 @@ def main(connection_string):
       # blocks_processed_total = Value('i', 0, lock=lock)
       # blocks_skipped_total = Value('i', 0, lock=lock)
       # Classes seem faster
-      blocks_processed_total = Counter(0)
-      blocks_skipped_total = Counter(0)
+      blocks_processed_total = CounterShared(0)
+      blocks_skipped_total = CounterShared(0)
 
       workers = []
       # start workers
@@ -999,7 +1056,7 @@ def main(connection_string):
       try:
         os.rename(f"./downloads/{entry}", f"./downloads/done/{entry}")
       except Exception as error:
-        print(error)
+        logger.error(error)
     else:
       logger.info(
         f"File {f_name} not found. Please download using download_dumps.sh")
@@ -1010,16 +1067,17 @@ def main(connection_string):
 
 
 if __name__ == '__main__':
+  # https://docs.python.org/3/library/argparse.html#argparse.ArgumentParser
   parser = argparse.ArgumentParser(description='Create DB')
-  parser.add_argument('-c', dest='connection_string', type=str,
-            required=True, help="Connection string to the postgres database")
-  parser.add_argument("-d", "--debug", action="store_true",
-            help="set loglevel to DEBUG")
-  parser.add_argument('--version', action='version',
-            version=f"%(prog)s {VERSION}")
+  parser.add_argument('-c', '--connection_string', dest='connection_string', type=str, required=True, help="Connection string to the postgres database")
+  parser.add_argument("-d", "--debug", action="store_true", help="set loglevel to DEBUG")
+  parser.add_argument('--version', action='version', version=f"%(prog)s {VERSION}")
+  parser.add_argument('-R', '--reset_db', dest='RESET_DB', action='store_true', default=RESET_DB, help="reset the database")
+  parser.add_argument('--commit_count', dest='COMMIT_COUNT', type=int, default=COMMIT_COUNT, help="commit every nth")
   args = parser.parse_args()
   if args.debug:
     logger.setLevel(logging.DEBUG)
+  
   main(args.connection_string)
 
 

@@ -55,6 +55,28 @@ Or for a psql prompt
 ./bin/psql
 ```
 
+### Usage
+Example of Compose command:
+`command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug --commit_count 10`
+
+```
+usage: create_db.py [-h] -c CONNECTION_STRING [-d] [--version] [-R] [--commit_count COMMIT_COUNT]
+
+Create DB
+
+options:
+  -h, --help            show this help message and exit
+  -c CONNECTION_STRING, --connection_string CONNECTION_STRING
+                        Connection string to the postgres database
+  -d, --debug           set loglevel to DEBUG
+  --version             show program's version number and exit
+  -R, --reset_db        reset the database
+  --commit_count COMMIT_COUNT
+                        commit every nth block
+```
+
+
+
 ## Docker-download (TBD)
 - I did not push this image to docker yet -
 
@@ -239,8 +261,11 @@ TODO:
 - [ ] replace all binstubs commands with demonized compose
 - [ ] Start charging for my hard work?
 
-## version: 2.0.11
+## version: 2.0.14
 
+- 2.0.14  added --reset_db and --commit_count 100
+- 2.0.13  now getRow before insert. ALSO works much better when commit instead of flush: parallel process don't use same blocks anymore
+- 2.0.12  added autoflush=True
 - 2.0.11  parent table multicolumn primary keys: trying to Handle concurrent INSERT with SQLAlchemy: it works but... technique from rachbelaid.com is 2015 old and other errors arise (except IntegrityError bleed into Exception + RecursionError: maximum recursion depth exceeded)
 - 2.0.10  better logging
 - 2.0.9   multiple bugfixes

@@ -15,8 +15,8 @@ services:
       REBUILD: true
     build:
       context: .
-    command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug
-    # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd
+    # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug --commit_count 10
+    command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd
     volumes:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
