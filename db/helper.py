@@ -37,19 +37,26 @@ def create_postgres_pool(connection_string):
   engine = create_engine(connection_string)
   return engine
 
+# TODO: read https://docs.sqlalchemy.org/en/20/core/connections.html#dbapi-autocommit
 # connection_string = 'postgresql+psycopg://whoisd:whoisd@db:5432/whoisd'
 # session = setup_connection(connection_string)
-def setup_connection(connection_string, create_db=False, auto_commit=False):
+def setup_connection(connection_string, reset_db=False):
   engine = create_postgres_pool(connection_string)
   # session = sessionmaker()
   # session.configure(bind=engine)
   # session = scoped_session(sessionmaker(bind=engine))
   session = scoped_session(sessionmaker(autoflush=True, bind=engine))
-  Base.metadata.bind = engine
+  # Base.metadata.bind = engine
   
-  if create_db:
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+  if reset_db:
+    try:
+      Base.metadata.drop_all(engine)
+    except:
+      pass
+    try:
+      Base.metadata.create_all(engine)
+    except:
+      pass
   
   return session()
 

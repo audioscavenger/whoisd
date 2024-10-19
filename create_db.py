@@ -48,16 +48,18 @@ from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.0.14'
+VERSION = '2.0.15'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
 # LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
-LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s() ] %(levelname)-8s: %(processName)-11s %(process)d - %(message)s'
+LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s() ] %(levelname)-8s: %(processName)-11s %(process)d - %(filename)s - %(message)s'
 COMMIT_COUNT = 10000
 MODULO = 10000
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
 RESET_DB = False
+AUTOFLUSH = False
+DEBUG = False
 
 class ContextFilter(logging.Filter):
   def filter(self, record):
@@ -311,7 +313,11 @@ def getParentRow(session, base, parent, parent_type, child, child_type):
   # https://docs.sqlalchemy.org/en/20/tutorial/data_select.html#using-select-statements
   # stmt = select(base).where(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)
   # return session.execute(stmt).first()
-  return session.query(base).filter(and_(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)).first()
+  try:
+    rows = session.query(base).filter(and_(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)).first()
+  except:
+    rows = None
+  return rows
 
 
 # https://docs.sqlalchemy.org/en/20/tutorial/data_select.html#using-select-statements
@@ -319,11 +325,13 @@ def getParentRow(session, base, parent, parent_type, child, child_type):
 def getCidrRow(session, base, cidr):
   stmt = select(base).where(base.inetnum == cidr)
   # sqlalchemy.exc.InvalidRequestError: This session is in 'prepared' state; no further SQL can be emitted within this transaction.
-  rows = session.execute(stmt).first()
+  try:
+    # rows = session.query(base).filter(base.inetnum == cidr).first()
+    rows = session.execute(stmt).first()
+  except:
+    rows = None
   logger.debug(f"inetnum {cidr} : rows={rows}")    # ('4.53.100.168/29',)
   return rows
-  
-  # return session.query(base).filter(base.inetnum == cidr).first()
 
 
 def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, blocks_skipped_total):
@@ -1000,9 +1008,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
 
 def main(connection_string):
   overall_start_time = time.time()
-  # reset database
-  if RESET_DB:
-    setup_connection(connection_string, create_db=True)
+  setup_connection(connection_string, RESET_DB)
 
   for entry in FILELIST:
     global CURRENT_FILENAME
@@ -1067,16 +1073,26 @@ def main(connection_string):
 
 
 if __name__ == '__main__':
+  # https://docs.python.org/3.10/library/argparse.html
   # https://docs.python.org/3/library/argparse.html#argparse.ArgumentParser
   parser = argparse.ArgumentParser(description='Create DB')
   parser.add_argument('-c', '--connection_string', dest='connection_string', type=str, required=True, help="Connection string to the postgres database")
-  parser.add_argument("-d", "--debug", action="store_true", help="set loglevel to DEBUG")
+  parser.add_argument("-d", "--debug", action='store_true', default=DEBUG, help="set loglevel to DEBUG")
+  parser.add_argument('--reset_db', action='store_true', default=RESET_DB, help="reset the database")
+  parser.add_argument('--commit_count', type=int, default=COMMIT_COUNT, help="commit every nth")
   parser.add_argument('--version', action='version', version=f"%(prog)s {VERSION}")
-  parser.add_argument('-R', '--reset_db', dest='RESET_DB', action='store_true', default=RESET_DB, help="reset the database")
-  parser.add_argument('--commit_count', dest='COMMIT_COUNT', type=int, default=COMMIT_COUNT, help="commit every nth")
+  
   args = parser.parse_args()
-  if args.debug:
-    logger.setLevel(logging.DEBUG)
+  # args = parser.parse_args('-c XXX --reset_db --commit_count 10'.split())
+  # print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',args)
+  # print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',args.reset_db)
+  # print('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',args.commit_count)
+  # exit()
+  
+  if args.debug: logger.setLevel(logging.DEBUG)
+  DEBUG         = args.debug
+  RESET_DB      = args.reset_db
+  COMMIT_COUNT  = args.commit_count
   
   main(args.connection_string)
 
@@ -1597,72 +1613,8 @@ if __name__ == '__main__':
 # source:         AFRINIC
 
 
-
-# 2024-10-11 18:18:53,349 - create_db - DEBUG    - Process-1   13 - arin.db.gz - committed 30002 blocks (4.57 seconds) 21.3% done, ignored 2994 duplicates
-# 2024-10-11 18:18:56,074 - create_db - DEBUG    - Process-1   13 - arin.db.gz - ignoring invalid changed date 20113511
-# <class 'sqlalchemy.exc.IntegrityError'> (psycopg.errors.UniqueViolation) duplicate key value violates unique constraint "parent_pkey"
-# DETAIL:  Key (parent, parent_type, child, child_type)=(NETWO480, \x6d6e746e6572, \x36392e33362e3135332e33302f3332, \x726f757465) already exists.
-# [SQL: INSERT INTO parent (parent, parent_type, child, child_type) VALUES (%(parent)s::VARCHAR, %(parent_type)s::VARCHAR, %(child)s::VARCHAR, %(child_type)s::VARCHAR)]
-# [parameters: [{'parent': 'MNT', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}, {'parent': 'VIO', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}, {'parent': '2', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}, {'parent': 'NETWO480', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}, {'parent': 'ARIN', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}, {'parent': 'NETWO480', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}, {'parent': 'ARIN', 'parent_type': b'mntner', 'child': b'69.36.153.30/32', 'child_type': b'route'}]]
-# (Background on this error at: https://sqlalche.me/e/20/gkpj)
-
-
-# docker-compose -f docker-compose.yml run --rm --service-ports whoisd
-# [+] Creating 1/0
- # ✔ Container whoisd-db  Created                                                                                                                                                                         0.0s
-# [+] Running 1/1
- # ✔ Container whoisd-db  Started                                                                                                                                                                         0.2s
-# pwd=/app
-# whoami=uid=1000(app) gid=1000(app) groups=1000(app)
-# ./download_dumps.sh
-# SKIP: arin.db.gz
-# SKIP: afrinic.db.gz
-# /app/create_db.py -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug
-# 2024-10-15 03:13:02,970 - create_db - INFO     - MainProcess 14 - afrinic.db.gz - File ./downloads/afrinic.db.gz not found. Please download using download_dumps.sh
-# 2024-10-15 03:13:02,971 - create_db - INFO     - MainProcess 14 - apnic.db.inetnum.gz - File ./downloads/apnic.db.inetnum.gz not found. Please download using download_dumps.sh
-# 2024-10-15 03:13:02,971 - create_db - INFO     - MainProcess 14 - arin.db.gz - parsing database file: ./downloads/arin.db.gz
-# 2024-10-15 03:13:03,332 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (10000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:03,421 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (20000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:03,525 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (30000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:03,618 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (40000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:03,719 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (50000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:03,818 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (60000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:03,911 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (70000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:04,048 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (80000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:04,152 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (90000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:04,248 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (100000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:04,342 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (110000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:04,449 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - parsed another 10000 blocks (120000 so far, ignored 0 blocks)
-# 2024-10-15 03:13:04,622 - create_db - INFO     - MainProcess 14 - arin.db.gz - Total 124320 blocks: Parsed 124320 blocks, ignored 0 blocks
-# 2024-10-15 03:13:04,623 - create_db - INFO     - MainProcess 14 - arin.db.gz - file parsing finished: 1.65 seconds
-# 2024-10-15 03:13:04,623 - create_db - INFO     - MainProcess 14 - arin.db.gz - parsing blocks
-# 2024-10-15 03:13:04,648 - create_db - DEBUG    - MainProcess 14 - arin.db.gz - starting 4 processes
-# 2024-10-15 03:13:04,858 - create_db - INFO     - MainProcess 14 - arin.db.gz - blocks load into workers finished: 0.24 seconds
-# 2024-10-15 03:13:05,135 - create_db - DEBUG    - Process-3   17 - arin.db.gz - committed 1/2089/8116 blocks (0.47 seconds) 6.5% done, ignored 0 duplicates
-# 2024-10-15 03:13:05,135 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 1/1549/8116 blocks (0.47 seconds) 6.5% done, ignored 0 duplicates
-# 2024-10-15 03:13:05,138 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 1/2272/8119 blocks (0.48 seconds) 6.5% done, ignored 0 duplicates
-# 2024-10-15 03:13:05,144 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 1/2348/8132 blocks (0.49 seconds) 6.5% done, ignored 0 duplicates
-# 2024-10-15 03:13:11,671 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date mike@elkhart.com20110613 (route 50.21.208.0/20 block=3223)
-# 2024-10-15 03:13:15,420 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date 20113511 (route 66.211.112.0/20 block=4310)
-# 2024-10-15 03:13:27,025 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 10001/13000/45835 blocks (21.88 seconds) 36.9% done, ignored 326 duplicates
-# 2024-10-15 03:13:27,055 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 10001/12189/45876 blocks (21.92 seconds) 36.9% done, ignored 320 duplicates
-# 2024-10-15 03:13:28,359 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 10001/12922/48143 blocks (23.22 seconds) 38.7% done, ignored 325 duplicates
-# 2024-10-15 03:13:34,817 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date 20113511 (route 173.241.64.0/20 block=13852)
-# 2024-10-15 03:13:35,526 - create_db - DEBUG    - Process-4   18 - arin.db.gz - ignoring invalid changed date ispadmin@tdstelecom.com (route 184.61.135.0/24 block=14597)
-# 2024-10-15 03:13:35,909 - create_db - DEBUG    - Process-3   17 - arin.db.gz - committed 10001/12801/62290 blocks (30.77 seconds) 50.1% done, ignored 356 duplicates
-# 2024-10-15 03:13:51,191 - create_db - DEBUG    - Process-4   18 - arin.db.gz - committed 20001/24901/89043 blocks (24.13 seconds) 71.6% done, ignored 1676 duplicates
-# 2024-10-15 03:13:51,756 - create_db - DEBUG    - Process-1   15 - arin.db.gz - committed 20001/25758/90240 blocks (24.73 seconds) 72.6% done, ignored 1705 duplicates
-# 2024-10-15 03:14:02,205 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 20001/28072/107901 blocks (33.85 seconds) 86.8% done, ignored 2900 duplicates
-# 2024-10-15 03:14:02,212 - create_db - DEBUG    - Process-2   16 - arin.db.gz - committed 20001/28074/107915 blocks (0.01 seconds) 86.8% done, ignored 2901 duplicates
-# 2024-10-15 03:14:03,042 - create_db - DEBUG    - Process-3   17 - arin.db.gz - ignoring invalid changed date 2011021700 (route 2604:CC00::/32 block=15597)
-# 2024-10-15 03:14:07,812 - create_db - DEBUG    - Process-3   17 - arin.db.gz - ignoring invalid changed date noc@craigslist.org (route 2620:7e::/44 block=17526)
-# 2024-10-15 03:14:08,451 - create_db - DEBUG    - Process-4   18 - arin.db.gz - Process-4 finished: 32579 blocks total
-# 2024-10-15 03:14:08,451 - create_db - DEBUG    - Process-2   16 - arin.db.gz - Process-2 finished: 31548 blocks total
-# 2024-10-15 03:14:08,452 - create_db - DEBUG    - Process-1   15 - arin.db.gz - Process-1 finished: 33173 blocks total
-# 2024-10-15 03:14:08,467 - create_db - DEBUG    - Process-3   17 - arin.db.gz - Process-3 finished: 27020 blocks total
-# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - arin.db.gz - block parsing finished: 63.85 seconds
-# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - lacnic.db.gz - File ./downloads/lacnic.db.gz not found. Please download using download_dumps.sh
-# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - ripe.db.inetnum.gz - File ./downloads/ripe.db.inetnum.gz not found. Please download using download_dumps.sh
-# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - apnic.db.inet6num.gz - File ./downloads/apnic.db.inet6num.gz not found. Please download using download_dumps.sh
-# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - ripe.db.inet6num.gz - File ./downloads/ripe.db.inet6num.gz not found. Please download using download_dumps.sh
-# 2024-10-15 03:14:08,476 - create_db - INFO     - MainProcess 14 - empty - script finished: 65.77 seconds
+# v2.0.15
+# [create_db: 997 -         parse_blocks() ] INFO    : Process-4   18 - arin.db.gz - committed 35567/10000/39866 inserts/blocks/total (165.55 seconds) 32.1% done, ignored 339/9509 dupes/total (215 inserts/s)
+# [create_db: 997 -         parse_blocks() ] INFO    : Process-2   16 - arin.db.gz - committed 35826/10000/39911 inserts/blocks/total (165.7 seconds) 32.1% done, ignored 261/9509 dupes/total (216 inserts/s)
+# [create_db: 997 -         parse_blocks() ] INFO    : Process-1   15 - arin.db.gz - committed 35380/10000/39950 inserts/blocks/total (165.89 seconds) 32.1% done, ignored 371/9509 dupes/total (213 inserts/s)
+# [create_db: 997 -         parse_blocks() ] INFO    : Process-3   17 - arin.db.gz - committed 35825/10000/40261 inserts/blocks/total (167.43 seconds) 32.4% done, ignored 284/9510 dupes/total (214 inserts/s)

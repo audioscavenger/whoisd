@@ -16,7 +16,8 @@ services:
     build:
       context: .
     # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug --commit_count 10
-    command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd
+    command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --reset_db
+    # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd
     volumes:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
@@ -29,7 +30,7 @@ services:
     restart: no
     security_opt:
       - no-new-privileges:true
-    # cpus: 1
+    cpus: 3
     # mem_limit: 1024M
     # mem_reservation: 256M
     # deploy:
