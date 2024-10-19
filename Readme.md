@@ -234,8 +234,9 @@ TODO:
 - [ ] increase efficiency
 - [ ] Start charging for my hard work?
 
-## version: 2.0.16
+## CHANGELOG
 
+- 2.0.17  317 inserts/s: 1 commit/block, no_autoflush
 - 2.0.16  300 inserts/s: 1 commit/block, autoflush
 - 2.0.15  215 inserts/s: 1 commit/insert, autoflush
 - 2.0.14  added --reset_db and --commit_count 100

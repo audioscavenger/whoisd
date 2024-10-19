@@ -48,11 +48,11 @@ from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.0.16'
+VERSION = '2.0.17'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
 # LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
-LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s() ] %(levelname)-8s: %(processName)-11s %(process)d - %(filename)s - %(message)s'
+LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s ] %(levelname)-8s: %(processName)-11s %(process)d - %(filename)s - %(message)s'
 COMMIT_COUNT = 10000
 MODULO = 10000
 NUM_BLOCKS = 0
@@ -1630,3 +1630,9 @@ if __name__ == '__main__':
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-2   18 - arin.db.gz - committed 35714/10000/40075 inserts/blocks/total (115.78 seconds) 32.2% done, ignored 614/10555 dupes/total (308 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-4   20 - arin.db.gz - committed 35723/10000/40112 inserts/blocks/total (115.91 seconds) 32.3% done, ignored 583/10555 dupes/total (308 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-3   19 - arin.db.gz - committed 35682/10000/40131 inserts/blocks/total (115.99 seconds) 32.3% done, ignored 549/10555 dupes/total (308 inserts/s)
+# v2.0.17 317 inserts/s: 1 commit/block, no_autoflush
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-2   18 - arin.db.gz - committed 35794/10000/39876 inserts/blocks/total (112.95 seconds) 32.1% done, ignored 559/10538 dupes/total (317 inserts/s)
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-1   17 - arin.db.gz - committed 35611/10000/39957 inserts/blocks/total (113.16 seconds) 32.1% done, ignored 557/10541 dupes/total (315 inserts/s)
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-4   20 - arin.db.gz - committed 35618/10000/40044 inserts/blocks/total (113.45 seconds) 32.2% done, ignored 579/10544 dupes/total (314 inserts/s)
+# [create_db:1004 -         parse_blocks() ] INFO    : Process-3   19 - arin.db.gz - committed 35585/10000/40112 inserts/blocks/total (113.66 seconds) 32.3% done, ignored 593/10544 dupes/total (313 inserts/s)
+# v2.0.18 

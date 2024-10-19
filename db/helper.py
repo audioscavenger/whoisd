@@ -45,7 +45,8 @@ def setup_connection(connection_string, reset_db=False):
   # session = sessionmaker()
   # session.configure(bind=engine)
   # session = scoped_session(sessionmaker(bind=engine))
-  session = scoped_session(sessionmaker(autoflush=True, bind=engine))
+  # session = scoped_session(sessionmaker(bind=engine, autoflush=True))
+  session = scoped_session(sessionmaker(bind=engine, autoflush=False))
   # Base.metadata.bind = engine
   
   if reset_db:

@@ -7,8 +7,25 @@ from db.helper import get_base
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import func
 
-Base = get_base()
+# postgresql.ARRAY(                 postgresql.DATEMULTIRANGE()       postgresql.INTERVAL(              postgresql.REGCLASS()         
+# postgresql.AbstractMultiRange()   postgresql.DATERANGE()            postgresql.Insert(                postgresql.REGCONFIG()        
+# postgresql.AbstractRange()        postgresql.DOMAIN(                postgresql.JSON(                  postgresql.Range(             
+# postgresql.AbstractSingleRange()  postgresql.DOUBLE_PRECISION(      postgresql.JSONB(                 postgresql.SMALLINT()         
+# postgresql.All(                   postgresql.DropDomainType(        postgresql.JSONPATH()             postgresql.TEXT(              
+# postgresql.Any(                   postgresql.DropEnumType(          postgresql.MACADDR()              postgresql.TIME(              
+# postgresql.BIGINT()               postgresql.ENUM(                  postgresql.MACADDR8()             postgresql.TIMESTAMP(         
+# postgresql.BIT(                   postgresql.ExcludeConstraint(     postgresql.MONEY()                postgresql.TSMULTIRANGE()     
+# postgresql.BOOLEAN(               postgresql.FLOAT(                 postgresql.ModuleType(            postgresql.TSQUERY()          
+# postgresql.BYTEA(                 postgresql.HSTORE(                postgresql.MultiRange(            postgresql.TSRANGE()          
+# postgresql.CHAR(                  postgresql.INET()                 postgresql.NUMERIC(               postgresql.TSTZMULTIRANGE()   
+# postgresql.CIDR()                 postgresql.INT4MULTIRANGE()       postgresql.NUMMULTIRANGE()        postgresql.TSTZRANGE()        
+# postgresql.CITEXT(                postgresql.INT4RANGE()            postgresql.NUMRANGE()             postgresql.TSVECTOR()         
+# postgresql.CreateDomainType(      postgresql.INT8MULTIRANGE()       postgresql.NamedType()            postgresql.UUID(              
+# postgresql.CreateEnumType(        postgresql.INT8RANGE()            postgresql.OID()                  postgresql.VARCHAR(           
+# postgresql.DATE()                 postgresql.INTEGER()              postgresql.REAL(                  postgresql.aggregate_order_by(
 
+
+Base = get_base()
 
 # inetnum=str(cidr), attr=b'inetnum', netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source
 # BlockCidr: inetnum, route
