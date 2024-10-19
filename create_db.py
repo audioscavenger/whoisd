@@ -1,36 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-# ./bin/query 168.80.174.2
-# SELECT block.inetnum, block.netname, block.country, block.description, block.mntby, block.created, block.last_modified, block.source FROM block WHERE block.inetnum >> '168.80.174.2' ORDER BY block.inetnum DESC;
-# -[ RECORD 1 ]-+--------------------------------------------------------------
-# inetnum     | 168.80.168.0/21
-# netname     | AS24567
-# country     |
-# description   | Route-object
-# mntby | TF-168-80-0-0-168-81-255-255-MNT
-# created     |
-# last_modified | 2020-05-23 00:00:00
-# source    | afrinic
-# -[ RECORD 2 ]-+--------------------------------------------------------------
-# inetnum     | 168.80.0.0/15
-# netname     | NETBLK-ANS-B
-# country     | SC
-# description   | Suite 9, Ansuya Estate Revolution Avenue Victoria, Seychelles
-# mntby | AFRINIC-HM-MNT
-# created     |
-# last_modified | 1994-02-15 00:00:00
-# source    | afrinic
-# -[ RECORD 3 ]-+--------------------------------------------------------------
-# inetnum     | 0.0.0.0/0
-# netname     | IANA-BLK
-# country     | EU # Country is really world wide
-# description   | The whole IPv4 address space
-# mntby | AFRINIC-HM-MNT
-# created     |
-# last_modified | 2001-05-29 00:00:00
-# source    | afrinic
-
 import argparse
 import gzip
 import time
@@ -48,13 +17,13 @@ from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.0.17'
+VERSION = '2.0.18'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
 # LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
 LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s ] %(levelname)-8s: %(processName)-11s %(process)d - %(filename)s - %(message)s'
-COMMIT_COUNT = 10000
-MODULO = 10000
+COMMIT_COUNT = 100
+BLOCKLOAD_MODULO = {0:10000,8000000:100000,99999999:1000000}
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
 RESET_DB = False
@@ -226,9 +195,8 @@ def read_blocks(filepath: str) -> list:
   blocks = []
   ignored_blocks = 0
   filesize = os.stat(filepath).st_size
-  global MODULO
-  if filesize >  8000000: MODULO = 100000
-  if filesize > 99999999: MODULO = 1000000
+  for cutoff in BLOCKLOAD_MODULO.keys():
+    if filesize > cutoff: modulo = BLOCKLOAD_MODULO[cutoff]
 
   with opemethod(filepath, mode='rb') as f:
     for line in f:
@@ -241,8 +209,8 @@ def read_blocks(filepath: str) -> list:
           # add source
           single_block += b"cust_source: %s" % (cust_source.encode('utf-8'))
           blocks.append(single_block)
-          if len(blocks) % MODULO == 0:
-            logger.debug(f"read_blocks: another {MODULO} blocks so far, Kept ({len(blocks)} blocks, Ignored {ignored_blocks} blocks, ")
+          if len(blocks) % modulo == 0:
+            logger.debug(f"read_blocks: another {modulo} blocks so far, Kept ({len(blocks)} blocks, Ignored {ignored_blocks} blocks, ")
           single_block = b''
           # comment out to only parse x blocks
           # if len(blocks) == 100:
@@ -967,11 +935,12 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     # blocks_processed_total.value() += 1
     blocks_processed_total.increment()
     
+    # v2.0.17
     try:
       session.commit()
     except Exception as e:
       session.rollback()
-      print(f"{TIME2COMMIT} blocks_processed {blocks_processed} blocks_processed_total {blocks_processed_total.value()} !{e.__class__.__name__}!")
+      logger.error(f"{TIME2COMMIT} blocks_processed {blocks_processed} blocks_processed_total {blocks_processed_total.value()} !{e.__class__.__name__}!")
     
     
     # We do many more loops for each block because of the parent table, also we decrement it sometimes, and will inevitably pass the mark. cannot use counter inserts here:
@@ -987,7 +956,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
         session.commit()
       except Exception as e:
         session.rollback()
-        print('TIME2COMMIT', e.__class__.__name__, type(e), e)
+        logger.error(f"TIME2COMMIT {e.__class__.__name__}: {e}")
       else:
         # session.close()
         # session = setup_connection(connection_string)
@@ -1620,6 +1589,36 @@ if __name__ == '__main__':
 # source:         AFRINIC
 
 
+# ./bin/query 168.80.174.2
+# SELECT block.inetnum, block.netname, block.country, block.description, block.mntby, block.created, block.last_modified, block.source FROM block WHERE block.inetnum >> '168.80.174.2' ORDER BY block.inetnum DESC;
+# -[ RECORD 1 ]-+--------------------------------------------------------------
+# inetnum     | 168.80.168.0/21
+# netname     | AS24567
+# country     |
+# description   | Route-object
+# mntby | TF-168-80-0-0-168-81-255-255-MNT
+# created     |
+# last_modified | 2020-05-23 00:00:00
+# source    | afrinic
+# -[ RECORD 2 ]-+--------------------------------------------------------------
+# inetnum     | 168.80.0.0/15
+# netname     | NETBLK-ANS-B
+# country     | SC
+# description   | Suite 9, Ansuya Estate Revolution Avenue Victoria, Seychelles
+# mntby | AFRINIC-HM-MNT
+# created     |
+# last_modified | 1994-02-15 00:00:00
+# source    | afrinic
+# -[ RECORD 3 ]-+--------------------------------------------------------------
+# inetnum     | 0.0.0.0/0
+# netname     | IANA-BLK
+# country     | EU # Country is really world wide
+# description   | The whole IPv4 address space
+# mntby | AFRINIC-HM-MNT
+# created     |
+# last_modified | 2001-05-29 00:00:00
+# source    | afrinic
+
 # v2.0.15 215 inserts/s: 1 commit/insert, autoflush
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-4   18 - arin.db.gz - committed 35567/10000/39866 inserts/blocks/total (165.55 seconds) 32.1% done, ignored 339/9509 dupes/total (215 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-2   16 - arin.db.gz - committed 35826/10000/39911 inserts/blocks/total (165.7 seconds) 32.1% done, ignored 261/9509 dupes/total (216 inserts/s)
@@ -1635,4 +1634,4 @@ if __name__ == '__main__':
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-1   17 - arin.db.gz - committed 35611/10000/39957 inserts/blocks/total (113.16 seconds) 32.1% done, ignored 557/10541 dupes/total (315 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-4   20 - arin.db.gz - committed 35618/10000/40044 inserts/blocks/total (113.45 seconds) 32.2% done, ignored 579/10544 dupes/total (314 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-3   19 - arin.db.gz - committed 35585/10000/40112 inserts/blocks/total (113.66 seconds) 32.3% done, ignored 593/10544 dupes/total (313 inserts/s)
-# v2.0.18 
+# v2.0.18 317 inserts/s: 1 commit/100 blocks, no_autoflush
