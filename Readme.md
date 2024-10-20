@@ -236,10 +236,11 @@ TODO:
 
 ## CHANGELOG
 
+- 2.0.19  379 inserts/s: 1 commit/block/worker, 1 nested/block, no_autoflush
 - 2.0.18  read_block MODULO cutoff based of filesize
-- 2.0.17  317 inserts/s: 1 commit/block, no_autoflush
-- 2.0.16  300 inserts/s: 1 commit/block, autoflush
-- 2.0.15  215 inserts/s: 1 commit/insert, autoflush
+- 2.0.17  317 inserts/s: 1 commit/block, 1 nested/insert, no_autoflush
+- 2.0.16  300 inserts/s: 1 commit/block, 1 nested/insert, autoflush
+- 2.0.15  215 inserts/s: 1 commit/insert, 1 nested/insert, autoflush
 - 2.0.14  added --reset_db and --commit_count 100
 - 2.0.13  now getRow before insert. ALSO works much better when commit instead of flush: parallel process don't use same blocks anymore
 - 2.0.12  added autoflush=True

@@ -17,12 +17,12 @@ from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.0.18'
+VERSION = '2.0.19'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
 # LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
 LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s ] %(levelname)-8s: %(processName)-11s %(process)d - %(filename)s - %(message)s'
-COMMIT_COUNT = 100
+COMMIT_COUNT = 10000
 BLOCKLOAD_MODULO = {0:10000,8000000:100000,99999999:1000000}
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
@@ -471,6 +471,9 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           last_modified = changed
       status = parse_property(block, b'status')
       
+      # v2.0.19
+      session.begin_nested()
+      
       # https://stackoverflow.com/questions/2136739/error-handling-in-sqlalchemy
       # https://stackoverflow.com/questions/32461785/sqlalchemy-check-before-insert-in-python
       # logger.debug('----------------------------------------------------- for cidr in inetnum: %s --- % attr')
@@ -485,7 +488,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
         # 3. A Block object doesn't exist so we create an instance
         b = BlockCidr(inetnum=cidr.decode('utf-8'), attr=attr, netname=netname, autnum=origin, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
         # 4. We create a savepoint in case of race condition 
-        session.begin_nested()
+        # session.begin_nested()
         try:
           # logger.debug('counter2: %d' % inserts)
           logger.debug('%d/%d inserts/blocks ADD   VALUES (cidr="%s","%s",netname="%s",..)' % (inserts,blocks_processed_total.value(),cidr.decode('utf-8'),attr,netname))
@@ -530,7 +533,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           # 3. A Block object doesn't exist so we create an instance
           b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=attr)
           # 4. We create a savepoint in case of race condition 
-          session.begin_nested()
+          # session.begin_nested()
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
@@ -563,7 +566,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
           # 3. A Block object doesn't exist so we create an instance
           b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
           # 4. We create a savepoint in case of race condition 
-          session.begin_nested()
+          # session.begin_nested()
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
@@ -936,6 +939,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
     blocks_processed_total.increment()
     
     # v2.0.17
+    # v2.0.19
     try:
       session.commit()
     except Exception as e:
@@ -957,6 +961,8 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bl
       except Exception as e:
         session.rollback()
         logger.error(f"TIME2COMMIT {e.__class__.__name__}: {e}")
+        # v2.0.19: [create_db: 959 -         parse_blocks ] ERROR   : Process-4   20 - arin.db.gz - TIME2COMMIT StatementError: (builtins.RecursionError) maximum recursion depth exceeded
+        #          [SQL: RELEASE SAVEPOINT sa_savepoint_144]
       else:
         # session.close()
         # session = setup_connection(connection_string)
@@ -1619,19 +1625,24 @@ if __name__ == '__main__':
 # last_modified | 2001-05-29 00:00:00
 # source    | afrinic
 
-# v2.0.15 215 inserts/s: 1 commit/insert, autoflush
+# v2.0.15 215 inserts/s: 1 commit/insert, 1 nested/insert, autoflush
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-4   18 - arin.db.gz - committed 35567/10000/39866 inserts/blocks/total (165.55 seconds) 32.1% done, ignored 339/9509 dupes/total (215 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-2   16 - arin.db.gz - committed 35826/10000/39911 inserts/blocks/total (165.7 seconds) 32.1% done, ignored 261/9509 dupes/total (216 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-1   15 - arin.db.gz - committed 35380/10000/39950 inserts/blocks/total (165.89 seconds) 32.1% done, ignored 371/9509 dupes/total (213 inserts/s)
 # [create_db: 997 -         parse_blocks() ] INFO    : Process-3   17 - arin.db.gz - committed 35825/10000/40261 inserts/blocks/total (167.43 seconds) 32.4% done, ignored 284/9510 dupes/total (214 inserts/s)
-# v2.0.16 300 inserts/s: 1 commit/block, autoflush
+# v2.0.16 300 inserts/s: 1 commit/block, 1 nested/insert, autoflush
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-1   17 - arin.db.gz - committed 35520/10000/39651 inserts/blocks/total (114.42 seconds) 31.9% done, ignored 553/10549 dupes/total (310 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-2   18 - arin.db.gz - committed 35714/10000/40075 inserts/blocks/total (115.78 seconds) 32.2% done, ignored 614/10555 dupes/total (308 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-4   20 - arin.db.gz - committed 35723/10000/40112 inserts/blocks/total (115.91 seconds) 32.3% done, ignored 583/10555 dupes/total (308 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-3   19 - arin.db.gz - committed 35682/10000/40131 inserts/blocks/total (115.99 seconds) 32.3% done, ignored 549/10555 dupes/total (308 inserts/s)
-# v2.0.17 317 inserts/s: 1 commit/block, no_autoflush
+# v2.0.17 317 inserts/s: 1 commit/block, 1 nested/insert, no_autoflush
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-2   18 - arin.db.gz - committed 35794/10000/39876 inserts/blocks/total (112.95 seconds) 32.1% done, ignored 559/10538 dupes/total (317 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-1   17 - arin.db.gz - committed 35611/10000/39957 inserts/blocks/total (113.16 seconds) 32.1% done, ignored 557/10541 dupes/total (315 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-4   20 - arin.db.gz - committed 35618/10000/40044 inserts/blocks/total (113.45 seconds) 32.2% done, ignored 579/10544 dupes/total (314 inserts/s)
 # [create_db:1004 -         parse_blocks() ] INFO    : Process-3   19 - arin.db.gz - committed 35585/10000/40112 inserts/blocks/total (113.66 seconds) 32.3% done, ignored 593/10544 dupes/total (313 inserts/s)
-# v2.0.18 317 inserts/s: 1 commit/100 blocks, no_autoflush
+# v2.0.19 379 inserts/s: 1 commit/block/worker, 1 nested/block, no_autoflush
+# [create_db: 979 -         parse_blocks ] INFO    : Process-2   18 - arin.db.gz - committed 35691/10000/39909 inserts/blocks/total (94.05 seconds) 32.1% done, ignored 546/10489 dupes/total (379 inserts/s)
+# [create_db: 979 -         parse_blocks ] INFO    : Process-1   17 - arin.db.gz - committed 35667/10000/39909 inserts/blocks/total (94.06 seconds) 32.1% done, ignored 542/10489 dupes/total (379 inserts/s)
+# [create_db: 979 -         parse_blocks ] INFO    : Process-3   19 - arin.db.gz - committed 35629/10000/40054 inserts/blocks/total (94.46 seconds) 32.2% done, ignored 568/10494 dupes/total (377 inserts/s)
+# [create_db: 979 -         parse_blocks ] INFO    : Process-4   20 - arin.db.gz - committed 35615/10000/40150 inserts/blocks/total (94.67 seconds) 32.3% done, ignored 584/10494 dupes/total (376 inserts/s)
+# v2.0.20 xxx inserts/s: 1 commit/100 block/worker, 1 nested/100 block, no_autoflush
