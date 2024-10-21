@@ -16,6 +16,7 @@ services:
     build:
       context: .
     # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --debug --commit_count 10
+    # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --reset_db --debug
     command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd --reset_db
     # command: -c postgresql+psycopg://whoisd:whoisd@db:5432/whoisd
     volumes:

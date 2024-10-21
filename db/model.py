@@ -31,12 +31,12 @@ Base = get_base()
 # BlockCidr: inetnum, route
 class BlockCidr(Base):
   __tablename__ = 'cidr'
-  id = Column(Integer, primary_key=True, autoincrement=True)
+  # id = Column(Integer, primary_key=True, autoincrement=True)
   # inetnum = Column(postgresql.CIDR, nullable=False, unique=True, index=True)
-  inetnum = Column(String, nullable=False, unique=True, index=True)
+  inetnum = Column(String, nullable=False, index=True)
+  autnum = Column(String, index=True)
   attr =  Column(String, nullable=False, index=True)
   netname = Column(String, nullable=True, index=True)
-  autnum = Column(String, index=True)
   country = Column(String, index=True)
   created = Column(DateTime, index=True)
   last_modified = Column(DateTime, index=True)
@@ -45,7 +45,11 @@ class BlockCidr(Base):
   description = Column(String)
   remarks = Column(String)
   
+  # single route can have multiple origins/autnum, which makes no sense to me
+  # 'route:          23.26.254.0/24\norigin:         AS198100\ndescr:          ipxo\nadmin-c:        GRINI-ARIN\ntech-c:         IST36-ARIN\nmnt-by:            MNT-IL-845\ncreated:        2023-11-26T14:35:58Z\nlast-modified:  2023-11-26T14:35:58Z\nsource:         ARIN\ncust_source: arin'
+  # 'route:          23.26.254.0/24\norigin:         AS51847\ndescr:          ipxo\nadmin-c:        GRINI-ARIN\ntech-c:         IST36-ARIN\nmnt-by:            MNT-IL-845\ncreated:        2024-01-17T16:06:36Z\nlast-modified:  2024-01-17T16:06:36Z\nsource:         ARIN\ncust_source: arin'
   __table_args__ = (
+    PrimaryKeyConstraint(inetnum, autnum),
     Index('ix_cidr_description', func.to_tsvector(literal_column("'english'"), description), postgresql_using="gin"), 
   )
   
@@ -106,7 +110,6 @@ class BlockParent(Base):
   
   __table_args__ = (
     PrimaryKeyConstraint(parent, parent_type, child, child_type),
-    {},
   )
   
   def __str__(self):

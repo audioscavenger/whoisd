@@ -236,6 +236,7 @@ TODO:
 
 ## CHANGELOG
 
+- 2.0.20  452 blocks/s: 1 begin+commit/insert as recommended, autoflush
 - 2.0.19  379 inserts/s: 1 commit/block/worker, 1 nested/block, no_autoflush
 - 2.0.18  read_block MODULO cutoff based of filesize
 - 2.0.17  317 inserts/s: 1 commit/block, 1 nested/insert, no_autoflush
