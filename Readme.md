@@ -236,7 +236,12 @@ TODO:
 
 ## CHANGELOG
 
-- 2.0.20  452 blocks/s: 1 begin+commit/insert as recommended, autoflush
+- 2.0.23  635 blocks/s: 1 begin+commit/block, no_autoflush + shuffle + 1 flush/select:  cidr=1746 parent=1846, 0% loss   flush before select seems to give consistant results, best solution so far
+- 2.1.1   nope: trying to get() without flush
+- 2.1.0   we need to flush before the session.get() returns anything. results are meh even with 300 blocks/commit: 210 blocks/s
+- 2.1.0   nope: build a uniq set of tuples of values to commit and back to 1 commit / COMMIT_COUNT blocks again
+- 2.0.21  348 blocks/s: 1 begin+commit/block, no_autoflush + shuffle + 1 flush/select:  cidr=1746 parent=1846, 0% loss   flush before select seems to give consistant results, best solution so far
+- 2.0.20  452 blocks/s: 1 begin+commit/insert as recommended, autoflush; count(cidr)=113895 count(parent)=94075
 - 2.0.19  379 inserts/s: 1 commit/block/worker, 1 nested/block, no_autoflush
 - 2.0.18  read_block MODULO cutoff based of filesize
 - 2.0.17  317 inserts/s: 1 commit/block, 1 nested/insert, no_autoflush
