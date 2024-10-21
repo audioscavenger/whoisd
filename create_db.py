@@ -9,6 +9,7 @@ from multiprocessing.sharedctypes import Value
 import logging
 import re
 import os
+import random
 
 from db.model import BlockCidr, BlockMember, BlockAttr, BlockParent
 from db.helper import setup_connection
@@ -17,13 +18,14 @@ from sqlalchemy import select, and_, or_, not_
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, PendingRollbackError
 from netaddr import iprange_to_cidrs
 
-VERSION = '2.0.20'
+VERSION = '2.1.0.21'
 FILELIST = ['afrinic.db.gz', 'apnic.db.inetnum.gz', 'arin.db.gz', 'lacnic.db.gz', 'ripe.db.inetnum.gz', 'apnic.db.inet6num.gz', 'ripe.db.inet6num.gz']
 NUM_WORKERS = cpu_count()
-NUM_WORKERS = 4
+# NUM_WORKERS = 1
 # LOG_FORMAT = '%(asctime)-15s - %(name)-9s/%(funcName)20s - %(levelname)-8s - %(processName)-11s %(process)d - %(filename)s - %(message)s'
 LOG_FORMAT = '[%(name)s:%(lineno)4s - %(funcName)20s ] %(levelname)-8s: %(processName)-11s %(process)d - %(filename)s - %(message)s'
 COMMIT_COUNT = 10000
+# COMMIT_COUNT = 300  # testing
 BLOCKLOAD_MODULO = {0:10000,8000000:100000,99999999:1000000}
 NUM_BLOCKS = 0
 CURRENT_FILENAME = "empty"
@@ -243,10 +245,10 @@ def updateCounter(counter: int):
       TIME2COMMIT = True
   return counter + 1
 
-def updateCounterLocal(counter: int, time2commit: bool):
+def updateCounterLocal(counter: int, time2commit: bool, commit_count=COMMIT_COUNT):
   # we do not reset TIME2COMMIT until it's False: this way even when we bypass the modulo, we get a commit close to it
   if not time2commit:
-    if counter % COMMIT_COUNT == 0:
+    if counter % commit_count == 0:
       time2commit = True
   return (counter + 1), time2commit
 
@@ -293,6 +295,7 @@ def getParentRow(session, base, parent, parent_type, child, child_type):
   # stmt = select(base).where(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)
   # return session.execute(stmt).first()
   try:
+    session.flush() # if autoflush=True, select will flush; better perf if only select flushes, we spare the flush time from add()
     rows = session.query(base).filter(and_(base.parent == parent, base.parent_type == parent_type, base.child == child, base.child_type == child_type)).first()
   except:
     rows = None
@@ -305,6 +308,7 @@ def getCidrRow(session, base, cidr, autnum):
   stmt = select(base).where(and_(base.inetnum == cidr, base.autnum == autnum))
   # sqlalchemy.exc.InvalidRequestError: This session is in 'prepared' state; no further SQL can be emitted within this transaction.
   try:
+    session.flush() # if autoflush=True, select will flush; better perf if only select flushes, we spare the flush time from add()
     # rows = session.query(base).filter(base.inetnum == cidr).first()
     rows = session.execute(stmt).first()
   except:
@@ -325,6 +329,12 @@ def printDbSize(session, message):
 
 
 def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bskip_total, blocks_duplicates_total):
+  # A Session object is basically an ongoing transaction of changes to a database (update, insert, delete). These operations aren't persisted to the database until they are committed (if your program aborts for some reason in mid-session transaction, any uncommitted changes within are lost).
+  # The session object registers transaction operations with session.add(), but doesn't yet communicate them to the database until session.flush() is called.
+  # session.flush() communicates a series of operations to the database (insert, update, delete). The database maintains them as pending operations in a transaction. The changes aren't persisted permanently to disk, or visible to other transactions until the database receives a COMMIT for the current transaction (which is what session.commit() does).
+  # session.commit() commits (persists) those changes to the database.
+  # flush() is always called as part of a call to commit() (1).
+  # When you use a Session object to query the database, the query will return results both from the database and from the flushed parts of the uncommitted transaction it holds. By default, Session objects autoflush their operations, but this can be disabled.
   session = setup_connection(connection_string)
 
   # all the value below are PER WORKER
@@ -498,7 +508,8 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
       status = parse_property(block, b'status')
       
       # v2.0.19
-      # session.begin_nested()
+      # v2.0.21
+      session.begin_nested()
       
       # https://stackoverflow.com/questions/2136739/error-handling-in-sqlalchemy
       # https://stackoverflow.com/questions/32461785/sqlalchemy-check-before-insert-in-python
@@ -517,21 +528,21 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
         # 3. A Block object doesn't exist so we create an instance
         b = BlockCidr(inetnum=cidr.decode('utf-8'), autnum=autnum, netname=netname, attr=attr, description=description, remarks=remarks, country=country, created=created, last_modified=last_modified, status=status, source=source)
         # 4. We create a savepoint in case of race condition 
-        session.begin_nested()
+        # session.begin_nested()
         try:
           # logger.debug('counter2: %d' % inserts)
           logger.debug("%s: BlockCidr %d/%d/%d:%d/%d inserts/blocks/btotal:dupes/dtotal (cidr='%s',autnum='%s',netname='%s','%s',..)" % ('before',inserts,blocks_processed,blocks_processed_total.value(),dupes,blocks_duplicates_total.value(), cidr.decode('utf-8'),autnum,netname,attr))
           session.add(b)
           # logger.debug('counter3: %d' % inserts)
           # The session.add() will not be flushed until the next "query operation" happens on the Session
-          session.flush()
           # 5. We try to insert and release the savepoint.
-          session.commit()
+          # session.flush()   # supposedly done with add() when autoflush=True
+          # session.commit()
           # logger.debug('counter4: %d' % inserts)
         except (IntegrityError) as e:
           # It is absolutely impossible to have fuplicate cidr, therefore that would be an actual error to raise
           # 6. The insert fail due to a concurrent transaction/actual dupe
-          session.rollback()
+          # session.rollback()
           rollbacks +=1
           blocks_duplicates_total.increment()
           logger.debug("%s: BlockCidr %d/%d/%d:%d/%d inserts/blocks/btotal:dupes/dtotal (cidr='%s',autnum='%s',netname='%s','%s',..)" % (e.__class__.__name__,inserts,blocks_processed,blocks_processed_total.value(),dupes,blocks_duplicates_total.value(), cidr.decode('utf-8'),autnum,netname,attr))
@@ -539,20 +550,21 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
           # logger.debug('counter6: %d: %s' % (inserts, type(e))) #  <class 'sqlalchemy.exc.PendingRollbackError'>
           # logger.debug(block)
         except (Exception) as e:
-          session.rollback()
+          # session.rollback()
           rollbacks +=1
           logger.error("%s: BlockCidr %d/%d/%d:%d/%d inserts/blocks/btotal:dupes/dtotal (cidr='%s',autnum='%s',netname='%s','%s',..)" % (e.__class__.__name__,inserts,blocks_processed,blocks_processed_total.value(),dupes,blocks_duplicates_total.value(), cidr.decode('utf-8'),autnum,netname,attr))
         else:
           # inserts = updateCounter(inserts)
           inserts, TIME2COMMIT = updateCounterLocal(inserts, TIME2COMMIT)
           # inserts += 1
-      
+      # session.commit()
       # Okay.. there are so many of these relationships (order of magnitude 2 or 3 compared to actual inetnums) that we end up with deadlock detected
       # By 31577 blocks we are up to 17633 dupes and down to 37 inserts/s
       # By 95382 blocks we are up to 67665 dupes and down to 15 inserts/s
       
       # logger.debug('----------------------------------------------------- for parent in parents: %s --- % attr')
       # inverse keys:
+      # session.begin_nested()
       # for parent_type, parents in [mntby, memberof, org, mntlowers, mntroutes, mntdomains, mntnfy, mntirt, adminc, techc, abusec, notifys]:
       for parent_type, parents in [mntby]:
         for parent in parents:
@@ -568,19 +580,20 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
           # 3. A Block object doesn't exist so we create an instance
           b = BlockParent(parent=parent, parent_type=parent_type, child=netname, child_type=attr)
           # 4. We create a savepoint in case of race condition 
-          session.begin_nested()
+          # session.begin_nested()
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
-            # session.flush()
-            session.commit()
+            # session.flush()   # supposedly done with add() when autoflush=True
+            # session.commit()
           except (IntegrityError) as e:
             # 6. The insert fail due to a concurrent transaction/actual dupe
-            session.rollback()
+            # session.rollback()
             rollbacksp +=1
             logger.debug("%s: BlockParent dupe %d: select * from parent where parent='%s' and parent_type='%s' and child='%s' and child_type='%s';" % (e.__class__.__name__,inserts, parent,parent_type,netname,attr))
           except Exception as e:
-            session.rollback()
+            # session.rollback()
+            rollbacksp +=1
             logger.error("%s: BlockParent error %d: ('%s','%s','%s','%s')" % (e.__class__.__name__,inserts, parent,parent_type,netname,attr))
           else:
             # insertsp = updateCounter(inserts)
@@ -588,9 +601,10 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
             insertsp += 1
           
         
-      
+      # session.commit()
       # logger.debug('----------------------------------------------------- for child in children: %s --- % attr')
       # local keys:
+      # session.begin_nested()
       for child_type, children in [notifys]:
         for child in children:
           # 1. Looking for an existing Block object for these url value
@@ -602,19 +616,20 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
           # 3. A Block object doesn't exist so we create an instance
           b = BlockParent(parent=netname, parent_type=attr, child=child, child_type=child_type)
           # 4. We create a savepoint in case of race condition 
-          session.begin_nested()
+          # session.begin_nested()
           try:
             session.add(b)
             # 5. We try to insert and release the savepoint
-            # session.flush()
-            session.commit()
+            # session.flush()   # supposedly done with add() when autoflush=True
+            # session.commit()
           except (IntegrityError) as e:
             # 6. The insert fail due to a concurrent transaction/actual dupe
-            session.rollback()
+            # session.rollback()
             rollbacksp +=1
             logger.debug("%s: BlockParent dupe %d: ('%s','%s','%s','%s')" % (e.__class__.__name__,inserts, parent,parent_type,netname,attr))
           except Exception as e:
-            session.rollback()
+            # session.rollback()
+            rollbacksp +=1
             logger.error("%s: BlockParent error %d: ('%s','%s','%s','%s')" % (e.__class__.__name__,inserts, parent,parent_type,netname,attr))
           else:
             # insertsp = updateCounter(inserts)
@@ -622,7 +637,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
             insertsp += 1
           
         
-      
+      # session.commit()
     
     # Attribute Name  Presence   Repeat     Indexed
     # mntner:         mandatory  single     primary/lookup key
@@ -976,11 +991,12 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
     
     # v2.0.17
     # v2.0.19
-    # try:
-      # session.commit()
-    # except Exception as e:
-      # session.rollback()
-      # logger.error(f"{TIME2COMMIT} blocks_processed {blocks_processed} blocks_processed_total {blocks_processed_total.value()} !{e.__class__.__name__}!")
+    # v2.0.21
+    try:
+      session.commit()
+    except Exception as e:
+      session.rollback()
+      logger.error(f"{TIME2COMMIT} blocks_processed {blocks_processed} blocks_processed_total {blocks_processed_total.value()} !{e.__class__.__name__}!")
     
     
     # We do many more loops for each block because of the parent table, also we decrement it sometimes, and will inevitably pass the mark. cannot use counter inserts here:
@@ -1023,6 +1039,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
         insertsps = round(inserts / seconds_total)
         insertspps = round(insertsp / seconds_total)
         logger.info('committed {}/{}/{}:{}/{}/{} inserts/dupes/rollbacks:blocks/btotal/bskip + {}/{}/{} insertsp/dupesp/rollbacksp ({:.0f} seconds) {:.0f}% done, ({:.0f}/{:.0f} inserts/p/s)'.format(inserts,dupes,rollbacks,blocks_processed,blocks_processed_total.value(),bskip, insertsp,dupesp,rollbacksp, seconds, percent, insertsps,insertspps))# printDbSize(session, 'after')
+        session.begin_nested()
       # /commit
     # /block
   # /while true
@@ -1036,6 +1053,7 @@ def parse_blocks(jobs: Queue, connection_string: str, blocks_processed_total, bs
   insertsps = round(inserts / seconds_total)
   insertspps = round(insertsp / seconds_total)
   logger.info('done {}/{}/{}:{}/{}/{} inserts/dupes/rollbacks:blocks/btotal/bskip + {}/{}/{} insertsp/dupesp/rollbacksp ({:.0f} seconds) {:.0f}% done, ({:.0f}/{:.0f} inserts/p/s)'.format(inserts,dupes,rollbacks,blocks_processed,blocks_processed_total.value(),bskip, insertsp,dupesp,rollbacksp, seconds, percent, insertsps,insertspps))
+  # printDbSize(session, 'done')
   session.close()
 
 
@@ -1050,10 +1068,11 @@ def main(connection_string):
     if os.path.exists(f_name):
       logger.info(f"loading database file: {f_name}")
       start_time = time.time()
-      # blocks = read_blocks(f_name)[:10000]
       blocks = read_blocks(f_name)
+      # blocks = read_blocks(f_name)[:10000]  # testing
       global NUM_BLOCKS
       NUM_BLOCKS = len(blocks)
+      
       seconds = time.time() - start_time
       seconds_total = seconds
       start_time = time.time()
@@ -1077,6 +1096,7 @@ def main(connection_string):
         workers.append(p)
 
       # add tasks
+      random.shuffle(blocks)
       for b in blocks:
         jobs.put(b)
       seconds = time.time() - start_time
@@ -1705,7 +1725,7 @@ if __name__ == '__main__':
 # [create_db: 979 -         parse_blocks ] INFO    : Process-3   19 - arin.db.gz - committed 35632/10000/39885 inserts/blocks/total (95.11 seconds) 32.1% done, ignored 555/10494 dupes/total (375 inserts/s)
 # [create_db: 979 -         parse_blocks ] INFO    : Process-4   20 - arin.db.gz - committed 35776/10000/40095 inserts/blocks/total (95.63 seconds) 32.3% done, ignored 525/10498 dupes/total (374 inserts/s)
 # [create_db: 979 -         parse_blocks ] INFO    : Process-1   17 - arin.db.gz - committed 35666/10000/40227 inserts/blocks/total (95.94 seconds) 32.4% done, ignored 595/10498 dupes/total (372 inserts/s)
-# v2.0.20 compare 1 NUM_WORKERS with 10000 blocks
+# v2.0.20 compare 1 NUM_WORKERS with 10000 blocks: cidr=1746 parent=4583
 # [create_db: 346 -         parse_blocks ] INFO    : Process-1   17 - arin.db.gz - committed 1746/0/0:1746/1746/8254 inserts/dupes/rollbacks:blocks/btotal/bskip + 8254/1846/126 insertsp/dupesp/rollbacksp (0 seconds) 1.0% done, (0.01 inserts/s)
 # [create_db:1085 -                 main ] INFO    : MainProcess 16 - arin.db.gz - BLOCKS PARSING DONE: 15 seconds (669 blocks/s) for 10000 blocks
 # v2.0.20 compare 2 NUM_WORKERS with 10000 blocks
@@ -1718,9 +1738,23 @@ if __name__ == '__main__':
 # [create_db: 348 -         parse_blocks ] INFO    : Process-1   17 - arin.db.gz - committed 432/0/0:432/1745/2068 inserts/dupes/rollbacks:blocks/btotal/bskip + 8254/456/18 insertsp/dupesp/rollbacksp (16 seconds) 0.4% done, (0.07/92 inserts/p/s)
 # [create_db: 348 -         parse_blocks ] INFO    : Process-4   20 - arin.db.gz - committed 427/0/0:427/1746/1654 inserts/dupes/rollbacks:blocks/btotal/bskip + 8254/447/13 insertsp/dupesp/rollbacksp (20 seconds) 0.4% done, (0.01/91 inserts/p/s)
 # [create_db:1093 -                 main ] INFO    : MainProcess 16 - arin.db.gz - BLOCKS PARSING DONE: 7 seconds (1536 blocks/s) for 10000 blocks
-# v2.0.20 1 452 blocks/s: 1 begin+commit/insert as recommended, autoflush
+# v2.0.20 1 452 blocks/s: 1 begin+commit/insert as recommended, autoflush:
 # [create_db:1038 -         parse_blocks ] INFO    : Process-1   17 - arin.db.gz - done 28594/0/0:28594/113895/2791 inserts/dupes/rollbacks:blocks/btotal/bskip + 23674/6034/807 insertsp/dupesp/rollbacksp (69 seconds) 23% done, (114/95 inserts/p/s)
 # [create_db:1038 -         parse_blocks ] INFO    : Process-4   20 - arin.db.gz - done 28528/0/0:28528/113895/2198 inserts/dupes/rollbacks:blocks/btotal/bskip + 23604/6057/835 insertsp/dupesp/rollbacksp (69 seconds) 23% done, (114/94 inserts/p/s)
 # [create_db:1038 -         parse_blocks ] INFO    : Process-3   19 - arin.db.gz - done 28378/0/0:28378/113895/2951 inserts/dupes/rollbacks:blocks/btotal/bskip + 23514/6059/745 insertsp/dupesp/rollbacksp (68 seconds) 23% done, (114/94 inserts/p/s)
 # [create_db:1038 -         parse_blocks ] INFO    : Process-2   18 - arin.db.gz - done 28395/0/0:28395/113895/2485 inserts/dupes/rollbacks:blocks/btotal/bskip + 23283/6166/848 insertsp/dupesp/rollbacksp (67 seconds) 23% done, (114/93 inserts/p/s)
 # [create_db:1098 -                 main ] INFO    : MainProcess 16 - arin.db.gz - BLOCKS PARSING DONE: 252 seconds (452 blocks/s) for 113895 blocks out of 124320
+# v2.0.20 compare 1 NUM_WORKERS with 10000 blocks:                                        cidr=1746 parent=1846, 0% loss
+# v2.0.21 1 331 blocks/s: 1 begin+commit/block, autoflush:                                cidr=1683 parent=1846, 4% loss, terrible
+# v2.0.21 1 282 blocks/s: 1 begin+commit/subblock, autoflush + shuffle:                   cidr=1746 parent=1846, 0% loss
+# v2.0.21 1 348 blocks/s: 1 begin+commit/block, autoflush    + shuffle:                   cidr=1746 parent=1846, 0% loss
+# v2.0.21 1 337 blocks/s: 1 begin+commit/block, autoflush    + shuffle + 1 flush/select:  cidr=1746 parent=1846, 0% loss   adding flushes definitely slow things down
+# v2.0.21 1 356 blocks/s: 1 begin+commit/block, no_autoflush + shuffle                 :  cidr=1746+/- parent=1846, 0+/-1% loss   removing all flushes definitely speeds things up but we randomely lose cidrs
+# v2.0.21 1 466 blocks/s: 1 begin+commit/1000block, no_autoflush + shuffle             :  cidr=4 parent=4,     100% loss   cannot select smth that was not commited...
+# v2.0.21 1 258 blocks/s: 1 begin+commit/1000block, no_autoflush + shuffle +flush/select: cidr=118 parent=136,  93% loss   flush before select helps but commits get Process 55923 waits for ShareLock on transaction 5724382; blocked by process 55925.
+# v2.0.21 1 366 blocks/s: 1 begin+commit/rnd block, autoflush    + shuffle +flush/select: cidr=rnd parent=rnd, rnd% loss   random commit_count produces random results. I have random feelings about that.
+# v2.0.21 1 337 blocks/s: 1 begin+commit/block, autoflush    + shuffle + 1 flush/select:  cidr=1746 parent=1846, 0% loss   adding flushes definitely slow things down
+# v2.0.21 1 192 blocks/s: 1 begin+flush/block, autoflush + shuffle + 1 flush/block:       cidr=952 parent=1029, rnd% loss  flush supposedly maintains them as pending operations in a transaction, but this proves they are not visible to other transactions
+# v2.0.21 1 348 blocks/s: 1 begin+commit/block, no_autoflush + shuffle + 1 flush/select:  cidr=1746 parent=1846, 0% loss   flush before select seems to give consistant results, best solution so far
+
+
